@@ -75,6 +75,9 @@ exports.vendorValidation = [
     .isLength({ max: 1000 }).withMessage('Description cannot exceed 1000 characters'),
   body('category')
     .notEmpty().withMessage('Category is required'),
+  body('businessType')
+    .optional()
+    .isIn(['individual', 'business', 'freelancer']).withMessage('Invalid business type'),
   body('email')
     .trim()
     .notEmpty().withMessage('Email is required')
@@ -96,7 +99,41 @@ exports.vendorValidation = [
     .notEmpty().withMessage('Country is required'),
   body('address.zipCode')
     .trim()
-    .notEmpty().withMessage('Zip code is required')
+    .notEmpty().withMessage('Zip code is required'),
+  // Banking details (optional but validated if provided)
+  body('bankDetails.accountHolderName')
+    .optional()
+    .trim()
+    .notEmpty().withMessage('Account holder name is required')
+    .isLength({ max: 100 }).withMessage('Account holder name cannot exceed 100 characters'),
+  body('bankDetails.bankName')
+    .optional()
+    .trim()
+    .notEmpty().withMessage('Bank name is required'),
+  body('bankDetails.accountNumber')
+    .optional()
+    .trim()
+    .notEmpty().withMessage('Account number is required')
+    .isNumeric().withMessage('Account number must contain only numbers'),
+  body('bankDetails.branchCode')
+    .optional()
+    .trim()
+    .notEmpty().withMessage('Branch code is required')
+    .isLength({ min: 6, max: 6 }).withMessage('Branch code must be exactly 6 digits')
+    .isNumeric().withMessage('Branch code must contain only numbers'),
+  body('bankDetails.accountType')
+    .optional()
+    .isIn(['savings', 'current', 'business']).withMessage('Invalid account type'),
+  // Social media (optional)
+  body('socialMedia.facebook')
+    .optional()
+    .trim(),
+  body('socialMedia.instagram')
+    .optional()
+    .trim(),
+  body('socialMedia.twitter')
+    .optional()
+    .trim()
 ];
 
 // Review validation

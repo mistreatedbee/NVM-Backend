@@ -2,10 +2,11 @@ const Vendor = require('../models/Vendor');
 const User = require('../models/User');
 const Product = require('../models/Product');
 const { sendEmail, vendorApprovalEmail } = require('../utils/email');
+const cloudinary = require('../utils/cloudinary');
 
 // @desc    Create vendor profile
 // @route   POST /api/vendors
-// @access  Private (Vendor)
+// @access  Private (Authenticated User)
 exports.createVendor = async (req, res, next) => {
   try {
     // Check if vendor already exists for this user
@@ -17,20 +18,58 @@ exports.createVendor = async (req, res, next) => {
       });
     }
 
-    // Create vendor
-    const vendor = await Vendor.create({
+    // Prepare vendor data
+    const vendorData = {
       ...req.body,
       user: req.user.id
-    });
+    };
 
-    // Update user role to vendor
-    await User.findByIdAndUpdate(req.user.id, { role: 'vendor' });
+    // Handle logo upload if file is provided
+    if (req.file) {
+      try {
+        // Upload to Cloudinary using buffer
+        const result = await new Promise((resolve, reject) => {
+          const uploadStream = cloudinary.uploader.upload_stream(
+            {
+              folder: 'nvm/vendors',
+              resource_type: 'auto',
+              transformation: [
+                { width: 500, height: 500, crop: 'limit' },
+                { quality: 'auto' },
+                { fetch_format: 'auto' }
+              ]
+            },
+            (error, result) => {
+              if (error) reject(error);
+              else resolve(result);
+            }
+          );
+          uploadStream.end(req.file.buffer);
+        });
+
+        vendorData.logo = {
+          public_id: result.public_id,
+          url: result.secure_url
+        };
+      } catch (uploadError) {
+        console.error('Logo upload error:', uploadError);
+        // Continue without logo if upload fails
+      }
+    }
+
+    // Create vendor
+    const vendor = await Vendor.create(vendorData);
+
+    // Don't update user role to vendor yet - wait for admin approval
+    // await User.findByIdAndUpdate(req.user.id, { role: 'vendor' });
 
     res.status(201).json({
       success: true,
+      message: 'Vendor registration submitted successfully. Awaiting admin approval.',
       data: vendor
     });
   } catch (error) {
+    console.error('Vendor creation error:', error);
     next(error);
   }
 };

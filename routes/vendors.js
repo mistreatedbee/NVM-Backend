@@ -13,9 +13,10 @@ const {
 } = require('../controllers/vendorController');
 const { authenticate, isVendor, isAdmin } = require('../middleware/auth');
 const { vendorValidation, validateId, validate, paginationValidation } = require('../middleware/validator');
+const upload = require('../middleware/upload');
 
 // Create vendor - authenticated user (not necessarily vendor role yet)
-router.post('/', authenticate, vendorValidation, validate, createVendor);
+router.post('/', authenticate, upload.single('logo'), vendorValidation, validate, createVendor);
 
 // Get all vendors - public/admin can filter by status
 router.get('/', paginationValidation, validate, getAllVendors);
