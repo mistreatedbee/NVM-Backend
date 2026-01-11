@@ -22,6 +22,17 @@ app.use(cors({
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
+    // Allow all Vercel preview and production URLs
+    if (origin.includes('vercel.app')) {
+      return callback(null, true);
+    }
+    
+    // Allow localhost for development
+    if (origin.includes('localhost')) {
+      return callback(null, true);
+    }
+    
+    // Check against whitelist
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
