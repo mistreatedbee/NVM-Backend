@@ -72,23 +72,23 @@ const vendorSchema = new mongoose.Schema({
     linkedin: String
   },
   
-  // Banking Information (for EFT payments)
+  // Banking Information (for EFT payments) - Optional but recommended
   bankDetails: {
     accountHolderName: {
-      type: String,
-      required: [true, 'Account holder name is required']
+      type: String
+      // Made optional - vendors can add this later
     },
     accountNumber: {
-      type: String,
-      required: [true, 'Account number is required']
+      type: String
+      // Made optional - vendors can add this later
     },
     bankName: {
-      type: String,
-      required: [true, 'Bank name is required']
+      type: String
+      // Made optional - vendors can add this later
     },
     branchCode: {
-      type: String,
-      required: [true, 'Branch code is required']
+      type: String
+      // Made optional - vendors can add this later
     },
     accountType: {
       type: String,
