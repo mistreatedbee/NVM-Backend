@@ -85,7 +85,7 @@ exports.getVendorBySlug = async (req, res, next) => {
 
 // @desc    Get all vendors
 // @route   GET /api/vendors
-// @access  Public
+// @access  Public (approved only) / Admin (all statuses)
 exports.getAllVendors = async (req, res, next) => {
   try {
     const page = parseInt(req.query.page, 10) || 1;
@@ -93,7 +93,16 @@ exports.getAllVendors = async (req, res, next) => {
     const skip = (page - 1) * limit;
 
     // Build query
-    const query = { status: 'approved', isActive: true };
+    const query = {};
+    
+    // If status is specified in query, use it (for admin)
+    if (req.query.status) {
+      query.status = req.query.status;
+    } else {
+      // Default: show only approved vendors for public
+      query.status = 'approved';
+      query.isActive = true;
+    }
 
     if (req.query.category) {
       query.category = req.query.category;

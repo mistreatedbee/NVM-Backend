@@ -66,6 +66,44 @@ exports.createReview = async (req, res, next) => {
   }
 };
 
+// @desc    Get all reviews
+// @route   GET /api/reviews
+// @access  Public
+exports.getAllReviews = async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 10;
+    const skip = (page - 1) * limit;
+
+    // Build query
+    const query = {};
+    if (req.query.sort) {
+      // Allow sorting
+    }
+
+    const reviews = await Review.find(query)
+      .populate('customer', 'name avatar')
+      .populate('product', 'name images')
+      .populate('vendor', 'storeName')
+      .sort('-createdAt')
+      .skip(skip)
+      .limit(limit);
+
+    const total = await Review.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      count: reviews.length,
+      total,
+      pages: Math.ceil(total / limit),
+      currentPage: page,
+      data: reviews
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // @desc    Get product reviews
 // @route   GET /api/reviews/product/:productId
 // @access  Public

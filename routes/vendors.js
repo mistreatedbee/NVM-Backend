@@ -14,9 +14,14 @@ const {
 const { authenticate, isVendor, isAdmin } = require('../middleware/auth');
 const { vendorValidation, validateId, validate, paginationValidation } = require('../middleware/validator');
 
-router.post('/', authenticate, isVendor, vendorValidation, validate, createVendor);
+// Create vendor - authenticated user (not necessarily vendor role yet)
+router.post('/', authenticate, vendorValidation, validate, createVendor);
+
+// Get all vendors - public/admin can filter by status
 router.get('/', paginationValidation, validate, getAllVendors);
-router.get('/me/profile', authenticate, isVendor, getMyVendorProfile);
+
+// Get my vendor profile - must be authenticated
+router.get('/me/profile', authenticate, getMyVendorProfile);
 router.get('/slug/:slug', getVendorBySlug);
 router.get('/:id', validateId, validate, getVendor);
 router.put('/:id', authenticate, validateId, validate, updateVendor);

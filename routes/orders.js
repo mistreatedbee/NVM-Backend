@@ -15,7 +15,8 @@ const { orderValidation, validateId, validate, paginationValidation } = require(
 router.post('/', authenticate, orderValidation, validate, createOrder);
 router.get('/', authenticate, isAdmin, paginationValidation, validate, getAllOrders);
 router.get('/my/orders', authenticate, paginationValidation, validate, getMyOrders);
-router.get('/vendor/orders', authenticate, isVendor, paginationValidation, validate, getVendorOrders);
+// Vendor orders - just need to be authenticated, will check vendor profile in controller
+router.get('/vendor/orders', authenticate, paginationValidation, validate, getVendorOrders);
 router.get('/:id', authenticate, validateId, validate, getOrder);
 router.put('/:id/status', authenticate, validateId, validate, updateOrderStatus);
 router.put('/:id/cancel', authenticate, validateId, validate, cancelOrder);
