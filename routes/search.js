@@ -1,0 +1,27 @@
+const express = require('express');
+const router = express.Router();
+const {
+  saveSearch,
+  getSearchHistory,
+  getPopularSearches,
+  clearSearchHistory,
+  generateRecommendations,
+  getRecommendations,
+  trackRecommendationClick
+} = require('../controllers/searchController');
+const { authenticate } = require('../middleware/auth');
+const { validateId, validate } = require('../middleware/validator');
+
+// Search history
+router.post('/history', authenticate, saveSearch);
+router.get('/history', authenticate, getSearchHistory);
+router.delete('/history', authenticate, clearSearchHistory);
+router.get('/popular', getPopularSearches);
+
+// Recommendations
+router.post('/recommendations/generate', authenticate, generateRecommendations);
+router.get('/recommendations', authenticate, getRecommendations);
+router.put('/recommendations/:id/click', authenticate, validateId, validate, trackRecommendationClick);
+
+module.exports = router;
+
