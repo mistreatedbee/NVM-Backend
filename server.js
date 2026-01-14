@@ -69,12 +69,14 @@ const bulkUploadRoutes = require('./routes/bulkUpload');
 const orderManagementRoutes = require('./routes/orderManagement');
 const invoiceRoutes = require('./routes/invoices');
 const analyticsRoutes = require('./routes/analytics');
+const { ensureDefaultCategories } = require('./utils/seedDefaultCategories');
 
 // MongoDB Connection
 mongoose.connect(process.env.MONGO_URI)
-.then(() => {
+.then(async () => {
   console.log('✅ MongoDB Connected');
   console.log(`📊 Database: ${mongoose.connection.db.databaseName}`);
+  await ensureDefaultCategories();
 })
 .catch((err) => {
   console.error('❌ MongoDB Connection Error:', err.message);
