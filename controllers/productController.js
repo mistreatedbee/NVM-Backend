@@ -1,6 +1,8 @@
 const Product = require('../models/Product');
 const Vendor = require('../models/Vendor');
 
+const PUBLIC_VISIBLE_STATUSES = ['active', 'out-of-stock'];
+
 // @desc    Create product
 // @route   POST /api/products
 // @access  Private (Vendor)
@@ -26,7 +28,9 @@ exports.createProduct = async (req, res, next) => {
     // Create product
     const product = await Product.create({
       ...req.body,
-      vendor: vendor._id
+      vendor: vendor._id,
+      // Ensure the product is visible immediately after creation
+      status: req.body.status || 'active'
     });
 
     // Update vendor product count
@@ -51,8 +55,8 @@ exports.getAllProducts = async (req, res, next) => {
     const limit = parseInt(req.query.limit, 10) || 12;
     const skip = (page - 1) * limit;
 
-    // Build query
-    const query = { status: 'active', isActive: true };
+    // Public list should only include visible products
+    const query = { status: { $in: PUBLIC_VISIBLE_STATUSES }, isActive: true };
 
     // Category filter
     if (req.query.category) {
@@ -101,6 +105,86 @@ exports.getAllProducts = async (req, res, next) => {
       .populate('vendor', 'storeName slug logo rating')
       .populate('category', 'name slug')
       .sort(sort)
+      .skip(skip)
+      .limit(limit);
+
+    const total = await Product.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      count: products.length,
+      total,
+      pages: Math.ceil(total / limit),
+      currentPage: page,
+      data: products
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get my products (vendor)
+// @route   GET /api/products/my
+// @access  Private (Vendor)
+exports.getMyProducts = async (req, res, next) => {
+  try {
+    const vendor = await Vendor.findOne({ user: req.user.id });
+
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor profile not found'
+      });
+    }
+
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 50;
+    const skip = (page - 1) * limit;
+
+    const query = { vendor: vendor._id, isActive: true };
+    if (req.query.status && req.query.status !== 'all') {
+      query.status = req.query.status;
+    }
+
+    const products = await Product.find(query)
+      .populate('category', 'name slug')
+      .sort('-createdAt')
+      .skip(skip)
+      .limit(limit);
+
+    const total = await Product.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      count: products.length,
+      total,
+      pages: Math.ceil(total / limit),
+      currentPage: page,
+      data: products
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get all products (admin)
+// @route   GET /api/products/admin
+// @access  Private (Admin)
+exports.getAdminProducts = async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 100;
+    const skip = (page - 1) * limit;
+
+    const query = {};
+    if (req.query.status && req.query.status !== 'all') {
+      query.status = req.query.status;
+    }
+
+    const products = await Product.find(query)
+      .populate('vendor', 'storeName slug logo rating')
+      .populate('category', 'name slug')
+      .sort('-createdAt')
       .skip(skip)
       .limit(limit);
 
@@ -267,7 +351,7 @@ exports.getVendorProducts = async (req, res, next) => {
 
     const query = { 
       vendor: req.params.vendorId,
-      status: 'active',
+      status: { $in: PUBLIC_VISIBLE_STATUSES },
       isActive: true
     };
 
