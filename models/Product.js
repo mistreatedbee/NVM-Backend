@@ -164,7 +164,9 @@ const productSchema = new mongoose.Schema({
   status: {
     type: String,
     enum: ['draft', 'active', 'inactive', 'out-of-stock'],
-    default: 'draft'
+    // Vendors expect newly created products to be visible immediately.
+    // If stock is 0 and inventory is tracked, the pre-save hook will mark it as 'out-of-stock'.
+    default: 'active'
   },
   featured: {
     type: Boolean,
