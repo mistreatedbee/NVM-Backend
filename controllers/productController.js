@@ -25,6 +25,15 @@ exports.createProduct = async (req, res, next) => {
       });
     }
 
+    // Temporary limit: vendors may only create 2 active products
+    const activeProductCount = await Product.countDocuments({ vendor: vendor._id, isActive: true });
+    if (activeProductCount >= 2) {
+      return res.status(403).json({
+        success: false,
+        message: 'Product limit reached: you can only add 2 products at the moment'
+      });
+    }
+
     // Create product
     const product = await Product.create({
       ...req.body,

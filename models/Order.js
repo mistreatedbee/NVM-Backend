@@ -1,5 +1,16 @@
 const mongoose = require('mongoose');
 
+function generateOrderNumber() {
+  const date = new Date();
+  const year = date.getFullYear().toString().slice(-2);
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  // Include day + ms to reduce collision risk vs 4-digit random alone
+  const day = String(date.getDate()).padStart(2, '0');
+  const ms = String(date.getTime()).slice(-5);
+  const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+  return `NVM${year}${month}${day}${ms}${random}`;
+}
+
 const orderItemSchema = new mongoose.Schema({
   product: {
     type: mongoose.Schema.Types.ObjectId,
@@ -46,7 +57,8 @@ const orderSchema = new mongoose.Schema({
   orderNumber: {
     type: String,
     unique: true,
-    required: true
+    required: true,
+    default: generateOrderNumber
   },
   customer: {
     type: mongoose.Schema.Types.ObjectId,
@@ -212,14 +224,10 @@ orderSchema.index({ status: 1 });
 orderSchema.index({ paymentStatus: 1 });
 orderSchema.index({ createdAt: -1 });
 
-// Generate order number before saving
-orderSchema.pre('save', async function(next) {
+// Ensure order number exists before validation runs (required validator happens before save)
+orderSchema.pre('validate', function(next) {
   if (!this.orderNumber) {
-    const date = new Date();
-    const year = date.getFullYear().toString().slice(-2);
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-    this.orderNumber = `NVM${year}${month}${random}`;
+    this.orderNumber = generateOrderNumber();
   }
   next();
 });
