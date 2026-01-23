@@ -170,7 +170,7 @@ exports.orderValidation = [
     .notEmpty().withMessage('Country is required'),
   body('paymentMethod')
     .notEmpty().withMessage('Payment method is required')
-    .isIn(['stripe', 'payfast', 'cash-on-delivery']).withMessage('Invalid payment method')
+    .isIn(['stripe', 'payfast', 'cash-on-delivery', 'eft', 'bank-transfer']).withMessage('Invalid payment method')
 ];
 
 // MongoDB ID validation
