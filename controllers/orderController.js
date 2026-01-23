@@ -107,13 +107,22 @@ exports.createOrder = async (req, res, next) => {
     // Create notifications for vendors
     const vendors = [...new Set(orderItems.map(item => item.vendor.toString()))];
     for (const vendorId of vendors) {
+      // Notification model targets a User, but order items store a Vendor reference.
+      // Resolve vendor -> user so notifications validate and show up for vendor accounts.
+      const vendor = await Vendor.findById(vendorId).select('user');
+      if (!vendor?.user) continue;
+
       await Notification.create({
-        recipient: vendorId,
-        type: 'order-placed',
+        user: vendor.user,
+        type: 'order',
         title: 'New Order Received',
         message: `You have received a new order ${order.orderNumber}`,
         link: `/vendor/orders/${order._id}`,
-        order: order._id
+        data: {
+          orderId: order._id,
+          orderNumber: order.orderNumber,
+          vendorId
+        }
       });
     }
 
