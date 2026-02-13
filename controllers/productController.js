@@ -3,6 +3,13 @@ const Vendor = require('../models/Vendor');
 
 const PUBLIC_VISIBLE_STATUSES = ['active', 'out-of-stock'];
 
+const PUBLIC_APPROVAL_QUERY = {
+  $and: [
+    { $or: [{ isApproved: true }, { isApproved: { $exists: false } }] },
+    { $or: [{ moderationStatus: 'approved' }, { moderationStatus: { $exists: false } }] }
+  ]
+};
+
 function addProductActivityLog(product, { action, message, metadata, performedBy, performedByRole }) {
   if (!Array.isArray(product.activityLogs)) {
     product.activityLogs = [];
@@ -100,8 +107,7 @@ exports.getAllProducts = async (req, res, next) => {
     const query = {
       status: { $in: PUBLIC_VISIBLE_STATUSES },
       isActive: true,
-      isApproved: true,
-      moderationStatus: 'approved'
+      ...PUBLIC_APPROVAL_QUERY
     };
 
     if (req.query.category) {
@@ -258,7 +264,14 @@ exports.getProduct = async (req, res, next) => {
       .populate('vendor', 'storeName slug logo rating totalReviews')
       .populate('category', 'name slug');
 
-    if (!product || !product.isActive || !product.isApproved) {
+    const isPubliclyVisible =
+      product &&
+      product.isActive &&
+      PUBLIC_VISIBLE_STATUSES.includes(product.status) &&
+      (product.isApproved === true || typeof product.isApproved === 'undefined') &&
+      (product.moderationStatus === 'approved' || typeof product.moderationStatus === 'undefined');
+
+    if (!isPubliclyVisible) {
       return res.status(404).json({
         success: false,
         message: 'Product not found'
@@ -286,7 +299,14 @@ exports.getProductBySlug = async (req, res, next) => {
       .populate('vendor', 'storeName slug logo rating totalReviews')
       .populate('category', 'name slug');
 
-    if (!product || !product.isActive || !product.isApproved) {
+    const isPubliclyVisible =
+      product &&
+      product.isActive &&
+      PUBLIC_VISIBLE_STATUSES.includes(product.status) &&
+      (product.isApproved === true || typeof product.isApproved === 'undefined') &&
+      (product.moderationStatus === 'approved' || typeof product.moderationStatus === 'undefined');
+
+    if (!isPubliclyVisible) {
       return res.status(404).json({
         success: false,
         message: 'Product not found'
@@ -653,8 +673,7 @@ exports.getVendorProducts = async (req, res, next) => {
       vendor: req.params.vendorId,
       status: { $in: PUBLIC_VISIBLE_STATUSES },
       isActive: true,
-      isApproved: true,
-      moderationStatus: 'approved'
+      ...PUBLIC_APPROVAL_QUERY
     };
 
     const products = await Product.find(query)
@@ -685,17 +704,29 @@ exports.getFeaturedProducts = async (req, res, next) => {
   try {
     const limit = parseInt(req.query.limit, 10) || 8;
 
-    const products = await Product.find({
+    let products = await Product.find({
       featured: true,
       status: 'active',
       isActive: true,
-      isApproved: true,
-      moderationStatus: 'approved'
+      ...PUBLIC_APPROVAL_QUERY
     })
       .populate('vendor', 'storeName slug logo')
       .populate('category', 'name slug')
       .sort('-rating -totalSales')
       .limit(limit);
+
+    // Fallback for stores with no explicitly featured products.
+    if (products.length === 0) {
+      products = await Product.find({
+        status: { $in: PUBLIC_VISIBLE_STATUSES },
+        isActive: true,
+        ...PUBLIC_APPROVAL_QUERY
+      })
+        .populate('vendor', 'storeName slug logo')
+        .populate('category', 'name slug')
+        .sort('-rating -totalSales -createdAt')
+        .limit(limit);
+    }
 
     res.status(200).json({
       success: true,

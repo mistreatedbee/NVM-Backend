@@ -260,8 +260,11 @@ exports.getAllVendors = async (req, res, next) => {
 
     const query = {
       status: 'approved',
-      accountStatus: 'active',
-      isActive: true
+      isActive: true,
+      $or: [
+        { accountStatus: 'active' },
+        { accountStatus: { $exists: false } } // Legacy vendors created before accountStatus
+      ]
     };
 
     if (req.query.category) {
