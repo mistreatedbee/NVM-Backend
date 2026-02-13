@@ -317,7 +317,7 @@ exports.getVendorBySlug = async (req, res, next) => {
     })
       .populate('user', 'name email avatar');
 
-    if (!vendor || !isPublicVendor(vendor)) {
+    if (!vendor) {
       return res.status(404).json({
         success: false,
         message: 'Vendor not found'
@@ -989,7 +989,7 @@ exports.getPublicVendorProfileBySlug = async (req, res, next) => {
       $or: [{ usernameSlug: req.params.slug }, { slug: req.params.slug }]
     }).populate('user', 'name avatar');
 
-    if (!vendor || !isPublicVendor(vendor)) {
+    if (!vendor) {
       return res.status(404).json({
         success: false,
         message: 'Vendor profile not found'
