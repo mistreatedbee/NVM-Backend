@@ -332,3 +332,52 @@ exports.paginationValidation = [
     .optional()
     .isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100')
 ];
+
+exports.vendorProfileValidation = [
+  body('storeName')
+    .trim()
+    .notEmpty().withMessage('Store name is required')
+    .isLength({ max: 100 }).withMessage('Store name cannot exceed 100 characters'),
+  body('usernameSlug')
+    .optional()
+    .trim()
+    .matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).withMessage('Slug must be URL-safe (lowercase letters, numbers, hyphens)'),
+  body('bio')
+    .optional()
+    .trim()
+    .isLength({ max: 1000 }).withMessage('Bio cannot exceed 1000 characters'),
+  body('about')
+    .optional()
+    .trim()
+    .isLength({ max: 2000 }).withMessage('About cannot exceed 2000 characters'),
+  body('email')
+    .optional()
+    .trim()
+    .isEmail().withMessage('Please provide a valid email'),
+  body('location')
+    .optional()
+    .isObject().withMessage('Location must be an object'),
+  body('location.country')
+    .optional()
+    .trim()
+    .isLength({ max: 100 }).withMessage('Country cannot exceed 100 characters'),
+  body('location.state')
+    .optional()
+    .trim()
+    .isLength({ max: 100 }).withMessage('State cannot exceed 100 characters'),
+  body('location.city')
+    .optional()
+    .trim()
+    .isLength({ max: 100 }).withMessage('City cannot exceed 100 characters'),
+  body('privacy.showPhone')
+    .optional()
+    .isBoolean().withMessage('showPhone must be true/false'),
+  body('privacy.showEmail')
+    .optional()
+    .isBoolean().withMessage('showEmail must be true/false')
+];
+
+exports.validateVendorId = [
+  param('vendorId')
+    .isMongoId().withMessage('Invalid vendor ID format')
+];
