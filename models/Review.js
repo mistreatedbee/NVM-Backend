@@ -38,6 +38,11 @@ const reviewSchema = new mongoose.Schema({
     public_id: String,
     url: String
   }],
+  videos: [{
+    public_id: String,
+    url: String,
+    duration: Number
+  }],
   
   // Moderation
   isApproved: {
@@ -72,6 +77,38 @@ const reviewSchema = new mongoose.Schema({
     default: false
   },
   
+  // Reporting & moderation workflow
+  reports: [{
+    reporter: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true
+    },
+    reason: {
+      type: String,
+      enum: ['spam', 'abuse', 'fake', 'off-topic', 'copyright', 'other'],
+      required: true
+    },
+    details: {
+      type: String,
+      maxlength: [500, 'Report details cannot be more than 500 characters']
+    },
+    status: {
+      type: String,
+      enum: ['open', 'resolved', 'dismissed'],
+      default: 'open'
+    },
+    handledBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    handledAt: Date
+  }],
+  reportCount: {
+    type: Number,
+    default: 0
+  },
+  
   isActive: {
     type: Boolean,
     default: true
@@ -87,6 +124,8 @@ reviewSchema.index({ customer: 1 });
 reviewSchema.index({ rating: 1 });
 reviewSchema.index({ createdAt: -1 });
 reviewSchema.index({ isApproved: 1 });
+reviewSchema.index({ reportCount: -1 });
+reviewSchema.index({ 'reports.status': 1 });
 
 // Ensure one review per customer per product
 reviewSchema.index({ product: 1, customer: 1 }, { unique: true, sparse: true });

@@ -51,7 +51,6 @@ const categorySchema = new mongoose.Schema({
 });
 
 // Indexes
-categorySchema.index({ slug: 1 });
 categorySchema.index({ parent: 1 });
 categorySchema.index({ isActive: 1 });
 categorySchema.index({ order: 1 });

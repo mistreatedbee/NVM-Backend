@@ -104,12 +104,107 @@ const vendorSchema = new mongoose.Schema({
     enum: ['pending', 'approved', 'rejected', 'suspended'],
     default: 'pending'
   },
+  accountStatus: {
+    type: String,
+    enum: ['active', 'pending', 'suspended', 'banned'],
+    default: 'pending'
+  },
   approvedAt: Date,
   approvedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
   rejectionReason: String,
+  suspensionReason: String,
+  suspendedAt: Date,
+  suspendedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  bannedAt: Date,
+  bannedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  statusUpdatedAt: Date,
+  statusUpdatedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  
+  // Verification and compliance documents
+  documents: [{
+    type: {
+      type: String,
+      enum: ['business-registration', 'tax-certificate', 'compliance', 'identity', 'bank-proof', 'other'],
+      required: true
+    },
+    name: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    file: {
+      public_id: String,
+      url: { type: String, required: true }
+    },
+    status: {
+      type: String,
+      enum: ['pending', 'verified', 'rejected'],
+      default: 'pending'
+    },
+    rejectionReason: String,
+    uploadedAt: {
+      type: Date,
+      default: Date.now
+    },
+    verifiedAt: Date,
+    verifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    expiresAt: Date
+  }],
+  complianceChecks: [{
+    checkType: {
+      type: String,
+      enum: ['kyc', 'business-license', 'tax', 'banking', 'policy', 'other'],
+      required: true
+    },
+    status: {
+      type: String,
+      enum: ['pending', 'passed', 'failed'],
+      required: true
+    },
+    notes: String,
+    checkedAt: {
+      type: Date,
+      default: Date.now
+    },
+    nextReviewAt: Date,
+    checkedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true
+    }
+  }],
+  activityLogs: [{
+    action: {
+      type: String,
+      required: true
+    },
+    message: String,
+    metadata: mongoose.Schema.Types.Mixed,
+    performedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    performedByRole: String,
+    createdAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
   
   // Stats
   rating: {
@@ -134,6 +229,11 @@ const vendorSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  topRatedBadge: {
+    type: Boolean,
+    default: false
+  },
+  topRatedSince: Date,
   
   // Settings
   settings: {
@@ -166,13 +266,14 @@ const vendorSchema = new mongoose.Schema({
 });
 
 // Indexes
-vendorSchema.index({ slug: 1 });
-vendorSchema.index({ user: 1 });
 vendorSchema.index({ status: 1 });
+vendorSchema.index({ accountStatus: 1 });
 vendorSchema.index({ category: 1 });
 vendorSchema.index({ rating: -1 });
 vendorSchema.index({ totalSales: -1 });
 vendorSchema.index({ storeName: 'text', description: 'text' });
+vendorSchema.index({ 'documents.status': 1 });
+vendorSchema.index({ 'complianceChecks.status': 1 });
 
 // Generate slug before saving
 vendorSchema.pre('save', function(next) {

@@ -136,7 +136,6 @@ const vendorSubscriptionSchema = new mongoose.Schema({
 });
 
 // Indexes
-vendorSubscriptionSchema.index({ vendor: 1 });
 vendorSubscriptionSchema.index({ status: 1 });
 vendorSubscriptionSchema.index({ endDate: 1 });
 

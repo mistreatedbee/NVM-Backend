@@ -1,15 +1,87 @@
 const Vendor = require('../models/Vendor');
 const User = require('../models/User');
 const Product = require('../models/Product');
+const Order = require('../models/Order');
+const Review = require('../models/Review');
 const { sendEmail, vendorApprovalEmail } = require('../utils/email');
 const cloudinary = require('../utils/cloudinary');
+
+function addActivityLog(vendor, { action, message, metadata, performedBy, performedByRole }) {
+  if (!Array.isArray(vendor.activityLogs)) {
+    vendor.activityLogs = [];
+  }
+
+  vendor.activityLogs.unshift({
+    action,
+    message,
+    metadata,
+    performedBy,
+    performedByRole
+  });
+
+  if (vendor.activityLogs.length > 200) {
+    vendor.activityLogs = vendor.activityLogs.slice(0, 200);
+  }
+}
+
+async function applyVendorAccountStatus(vendor, user, accountStatus, reason, actorId) {
+  const now = new Date();
+
+  vendor.accountStatus = accountStatus;
+  vendor.statusUpdatedAt = now;
+  vendor.statusUpdatedBy = actorId;
+
+  if (accountStatus === 'active') {
+    vendor.status = 'approved';
+    vendor.isActive = true;
+    vendor.approvedAt = now;
+    vendor.approvedBy = actorId;
+    vendor.rejectionReason = undefined;
+    vendor.suspensionReason = undefined;
+    vendor.suspendedAt = undefined;
+    vendor.suspendedBy = undefined;
+    vendor.bannedAt = undefined;
+    vendor.bannedBy = undefined;
+    user.isActive = true;
+    user.isBanned = false;
+    user.role = 'vendor';
+  } else if (accountStatus === 'pending') {
+    vendor.status = 'pending';
+    vendor.isActive = true;
+    vendor.rejectionReason = reason || undefined;
+    vendor.suspensionReason = undefined;
+    vendor.suspendedAt = undefined;
+    vendor.suspendedBy = undefined;
+    vendor.bannedAt = undefined;
+    vendor.bannedBy = undefined;
+    user.isActive = true;
+    user.isBanned = false;
+  } else if (accountStatus === 'suspended') {
+    vendor.status = 'suspended';
+    vendor.isActive = false;
+    vendor.suspensionReason = reason || 'Suspended by admin';
+    vendor.suspendedAt = now;
+    vendor.suspendedBy = actorId;
+    user.isActive = false;
+    user.isBanned = false;
+  } else if (accountStatus === 'banned') {
+    vendor.status = 'suspended';
+    vendor.isActive = false;
+    vendor.suspensionReason = reason || 'Banned by admin';
+    vendor.bannedAt = now;
+    vendor.bannedBy = actorId;
+    user.isActive = false;
+    user.isBanned = true;
+  }
+
+  await user.save();
+}
 
 // @desc    Create vendor profile
 // @route   POST /api/vendors
 // @access  Private (Authenticated User)
 exports.createVendor = async (req, res, next) => {
   try {
-    // Check if vendor already exists for this user
     const existingVendor = await Vendor.findOne({ user: req.user.id });
     if (existingVendor) {
       return res.status(400).json({
@@ -18,16 +90,14 @@ exports.createVendor = async (req, res, next) => {
       });
     }
 
-    // Prepare vendor data
     const vendorData = {
       ...req.body,
-      user: req.user.id
+      user: req.user.id,
+      accountStatus: 'pending'
     };
 
-    // Handle logo upload if file is provided
     if (req.file) {
       try {
-        // Upload to Cloudinary using buffer
         const result = await new Promise((resolve, reject) => {
           const uploadStream = cloudinary.uploader.upload_stream(
             {
@@ -39,9 +109,9 @@ exports.createVendor = async (req, res, next) => {
                 { fetch_format: 'auto' }
               ]
             },
-            (error, result) => {
+            (error, uploadResult) => {
               if (error) reject(error);
-              else resolve(result);
+              else resolve(uploadResult);
             }
           );
           uploadStream.end(req.file.buffer);
@@ -53,15 +123,18 @@ exports.createVendor = async (req, res, next) => {
         };
       } catch (uploadError) {
         console.error('Logo upload error:', uploadError);
-        // Continue without logo if upload fails
       }
     }
 
-    // Create vendor
     const vendor = await Vendor.create(vendorData);
 
-    // Don't update user role to vendor yet - wait for admin approval
-    // await User.findByIdAndUpdate(req.user.id, { role: 'vendor' });
+    addActivityLog(vendor, {
+      action: 'vendor.created',
+      message: 'Vendor registration submitted and awaiting approval',
+      performedBy: req.user.id,
+      performedByRole: req.user.role
+    });
+    await vendor.save();
 
     res.status(201).json({
       success: true,
@@ -69,7 +142,6 @@ exports.createVendor = async (req, res, next) => {
       data: vendor
     });
   } catch (error) {
-    console.error('Vendor creation error:', error);
     next(error);
   }
 };
@@ -80,7 +152,62 @@ exports.createVendor = async (req, res, next) => {
 exports.getVendor = async (req, res, next) => {
   try {
     const vendor = await Vendor.findById(req.params.id)
-      .populate('user', 'name email avatar');
+      .populate('user', 'name avatar');
+
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor not found'
+      });
+    }
+
+    const safeVendor = {
+      _id: vendor._id,
+      storeName: vendor.storeName,
+      slug: vendor.slug,
+      description: vendor.description,
+      logo: vendor.logo,
+      banner: vendor.banner,
+      category: vendor.category,
+      businessType: vendor.businessType,
+      website: vendor.website,
+      socialMedia: vendor.socialMedia,
+      address: vendor.address,
+      rating: vendor.rating,
+      totalReviews: vendor.totalReviews,
+      totalProducts: vendor.totalProducts,
+      totalSales: vendor.totalSales,
+      totalRevenue: vendor.totalRevenue,
+      topRatedBadge: vendor.topRatedBadge,
+      topRatedSince: vendor.topRatedSince,
+      status: vendor.status,
+      accountStatus: vendor.accountStatus,
+      createdAt: vendor.createdAt,
+      updatedAt: vendor.updatedAt
+    };
+
+    res.status(200).json({
+      success: true,
+      data: safeVendor
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get vendor full profile for admin
+// @route   GET /api/vendors/admin/:id
+// @access  Private (Admin)
+exports.getAdminVendorDetails = async (req, res, next) => {
+  try {
+    const vendor = await Vendor.findById(req.params.id)
+      .populate('user', 'name email avatar isActive isBanned')
+      .populate('statusUpdatedBy', 'name email')
+      .populate('approvedBy', 'name email')
+      .populate('suspendedBy', 'name email')
+      .populate('bannedBy', 'name email')
+      .populate('documents.verifiedBy', 'name email')
+      .populate('complianceChecks.checkedBy', 'name email');
 
     if (!vendor) {
       return res.status(404).json({
@@ -124,24 +251,18 @@ exports.getVendorBySlug = async (req, res, next) => {
 
 // @desc    Get all vendors
 // @route   GET /api/vendors
-// @access  Public (approved only) / Admin (all statuses)
+// @access  Public (approved only)
 exports.getAllVendors = async (req, res, next) => {
   try {
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 12;
     const skip = (page - 1) * limit;
 
-    // Build query
-    const query = {};
-    
-    // If status is specified in query, use it (for admin)
-    if (req.query.status) {
-      query.status = req.query.status;
-    } else {
-      // Default: show only approved vendors for public
-      query.status = 'approved';
-      query.isActive = true;
-    }
+    const query = {
+      status: 'approved',
+      accountStatus: 'active',
+      isActive: true
+    };
 
     if (req.query.category) {
       query.category = req.query.category;
@@ -151,7 +272,6 @@ exports.getAllVendors = async (req, res, next) => {
       query.$text = { $search: req.query.search };
     }
 
-    // Sort
     let sort = '-createdAt';
     if (req.query.sort === 'rating') {
       sort = '-rating';
@@ -180,12 +300,64 @@ exports.getAllVendors = async (req, res, next) => {
   }
 };
 
+// @desc    Get all vendors for admin
+// @route   GET /api/vendors/admin/all
+// @access  Private (Admin)
+exports.getAdminVendors = async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 20;
+    const skip = (page - 1) * limit;
+
+    const query = {};
+    if (req.query.status && req.query.status !== 'all') {
+      query.status = req.query.status;
+    }
+    if (req.query.accountStatus && req.query.accountStatus !== 'all') {
+      query.accountStatus = req.query.accountStatus;
+    }
+    if (req.query.category) {
+      query.category = req.query.category;
+    }
+    if (req.query.search) {
+      query.$text = { $search: req.query.search };
+    }
+
+    let sort = '-createdAt';
+    if (req.query.sort === 'rating') {
+      sort = '-rating';
+    } else if (req.query.sort === 'sales') {
+      sort = '-totalSales';
+    }
+
+    const vendors = await Vendor.find(query)
+      .populate('user', 'name email avatar isActive isBanned')
+      .populate('statusUpdatedBy', 'name email')
+      .sort(sort)
+      .skip(skip)
+      .limit(limit);
+
+    const total = await Vendor.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      count: vendors.length,
+      total,
+      pages: Math.ceil(total / limit),
+      currentPage: page,
+      data: vendors
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // @desc    Update vendor profile
 // @route   PUT /api/vendors/:id
 // @access  Private (Vendor/Admin)
 exports.updateVendor = async (req, res, next) => {
   try {
-    let vendor = await Vendor.findById(req.params.id);
+    const vendor = await Vendor.findById(req.params.id);
 
     if (!vendor) {
       return res.status(404).json({
@@ -194,7 +366,6 @@ exports.updateVendor = async (req, res, next) => {
       });
     }
 
-    // Check ownership
     if (vendor.user.toString() !== req.user.id && req.user.role !== 'admin') {
       return res.status(403).json({
         success: false,
@@ -202,18 +373,444 @@ exports.updateVendor = async (req, res, next) => {
       });
     }
 
-    vendor = await Vendor.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      {
-        new: true,
-        runValidators: true
-      }
-    );
+    Object.assign(vendor, req.body);
+    await vendor.save();
+
+    addActivityLog(vendor, {
+      action: req.user.role === 'admin' ? 'vendor.updated.by-admin' : 'vendor.updated.by-owner',
+      message: 'Vendor profile updated',
+      metadata: { updatedFields: Object.keys(req.body || {}) },
+      performedBy: req.user.id,
+      performedByRole: req.user.role
+    });
+    await vendor.save();
 
     res.status(200).json({
       success: true,
       data: vendor
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Admin update vendor profile
+// @route   PUT /api/vendors/:id/admin-profile
+// @access  Private (Admin)
+exports.adminUpdateVendorProfile = async (req, res, next) => {
+  try {
+    const vendor = await Vendor.findById(req.params.id);
+
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor not found'
+      });
+    }
+
+    const updatableFields = [
+      'storeName',
+      'description',
+      'category',
+      'businessType',
+      'taxId',
+      'businessLicense',
+      'email',
+      'phone',
+      'website',
+      'address',
+      'socialMedia',
+      'bankDetails',
+      'settings'
+    ];
+
+    updatableFields.forEach((field) => {
+      if (Object.prototype.hasOwnProperty.call(req.body, field)) {
+        vendor[field] = req.body[field];
+      }
+    });
+
+    await vendor.save();
+
+    addActivityLog(vendor, {
+      action: 'vendor.profile.edited',
+      message: 'Admin edited vendor profile',
+      metadata: { updatedFields: updatableFields.filter((field) => Object.prototype.hasOwnProperty.call(req.body, field)) },
+      performedBy: req.user.id,
+      performedByRole: req.user.role
+    });
+    await vendor.save();
+
+    res.status(200).json({
+      success: true,
+      data: vendor
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Update vendor account status
+// @route   PUT /api/vendors/:id/status
+// @access  Private (Admin)
+exports.updateVendorStatus = async (req, res, next) => {
+  try {
+    const { accountStatus, reason } = req.body;
+    const vendor = await Vendor.findById(req.params.id);
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor not found'
+      });
+    }
+
+    const user = await User.findById(vendor.user);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor user not found'
+      });
+    }
+
+    await applyVendorAccountStatus(vendor, user, accountStatus, reason, req.user.id);
+
+    addActivityLog(vendor, {
+      action: 'vendor.status.updated',
+      message: `Vendor account status changed to ${accountStatus}`,
+      metadata: { reason: reason || null },
+      performedBy: req.user.id,
+      performedByRole: req.user.role
+    });
+    await vendor.save();
+
+    res.status(200).json({
+      success: true,
+      data: vendor
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Upload vendor document
+// @route   POST /api/vendors/:id/documents
+// @access  Private (Vendor/Admin)
+exports.uploadVendorDocument = async (req, res, next) => {
+  try {
+    const vendor = await Vendor.findById(req.params.id);
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor not found'
+      });
+    }
+
+    if (vendor.user.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to upload documents for this vendor'
+      });
+    }
+
+    let file = { public_id: req.body.public_id || '', url: req.body.url || '' };
+
+    if (req.file) {
+      const result = await new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream(
+          {
+            folder: 'nvm/vendor-documents',
+            resource_type: 'auto'
+          },
+          (error, uploadResult) => {
+            if (error) reject(error);
+            else resolve(uploadResult);
+          }
+        );
+        uploadStream.end(req.file.buffer);
+      });
+
+      file = {
+        public_id: result.public_id,
+        url: result.secure_url
+      };
+    }
+
+    if (!file.url) {
+      return res.status(400).json({
+        success: false,
+        message: 'Document file is required'
+      });
+    }
+
+    const document = {
+      type: req.body.type,
+      name: req.body.name,
+      file,
+      expiresAt: req.body.expiresAt ? new Date(req.body.expiresAt) : undefined
+    };
+
+    vendor.documents.push(document);
+
+    addActivityLog(vendor, {
+      action: 'vendor.document.uploaded',
+      message: `Document uploaded (${req.body.type})`,
+      metadata: { type: req.body.type, name: req.body.name },
+      performedBy: req.user.id,
+      performedByRole: req.user.role
+    });
+    await vendor.save();
+
+    res.status(201).json({
+      success: true,
+      data: vendor.documents[vendor.documents.length - 1]
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Review vendor document
+// @route   PUT /api/vendors/:id/documents/:docId/review
+// @access  Private (Admin)
+exports.reviewVendorDocument = async (req, res, next) => {
+  try {
+    const { action, reason } = req.body;
+    const vendor = await Vendor.findById(req.params.id);
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor not found'
+      });
+    }
+
+    const document = vendor.documents.id(req.params.docId);
+    if (!document) {
+      return res.status(404).json({
+        success: false,
+        message: 'Document not found'
+      });
+    }
+
+    if (action === 'verify') {
+      document.status = 'verified';
+      document.rejectionReason = undefined;
+      document.verifiedBy = req.user.id;
+      document.verifiedAt = new Date();
+    } else {
+      document.status = 'rejected';
+      document.rejectionReason = reason || 'Rejected by admin';
+      document.verifiedBy = req.user.id;
+      document.verifiedAt = new Date();
+    }
+
+    addActivityLog(vendor, {
+      action: 'vendor.document.reviewed',
+      message: `Document ${action === 'verify' ? 'verified' : 'rejected'}`,
+      metadata: { documentId: req.params.docId, reason: reason || null },
+      performedBy: req.user.id,
+      performedByRole: req.user.role
+    });
+    await vendor.save();
+
+    res.status(200).json({
+      success: true,
+      data: document
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Add compliance check
+// @route   POST /api/vendors/:id/compliance-checks
+// @access  Private (Admin)
+exports.addComplianceCheck = async (req, res, next) => {
+  try {
+    const vendor = await Vendor.findById(req.params.id);
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor not found'
+      });
+    }
+
+    const check = {
+      checkType: req.body.checkType,
+      status: req.body.status,
+      notes: req.body.notes,
+      nextReviewAt: req.body.nextReviewAt ? new Date(req.body.nextReviewAt) : undefined,
+      checkedBy: req.user.id
+    };
+
+    vendor.complianceChecks.unshift(check);
+
+    addActivityLog(vendor, {
+      action: 'vendor.compliance.checked',
+      message: `Compliance check recorded: ${check.checkType} (${check.status})`,
+      metadata: { checkType: check.checkType, status: check.status },
+      performedBy: req.user.id,
+      performedByRole: req.user.role
+    });
+    await vendor.save();
+
+    res.status(201).json({
+      success: true,
+      data: vendor.complianceChecks[0]
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get vendor documents (paginated)
+// @route   GET /api/vendors/:id/documents
+// @access  Private (Admin)
+exports.getVendorDocuments = async (req, res, next) => {
+  try {
+    const vendor = await Vendor.findById(req.params.id)
+      .populate('documents.verifiedBy', 'name email');
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor not found'
+      });
+    }
+
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 10;
+    const status = req.query.status;
+    const type = req.query.type;
+
+    let documents = Array.isArray(vendor.documents) ? vendor.documents : [];
+    if (status && status !== 'all') {
+      documents = documents.filter((doc) => doc.status === status);
+    }
+    if (type && type !== 'all') {
+      documents = documents.filter((doc) => doc.type === type);
+    }
+
+    const total = documents.length;
+    const start = (page - 1) * limit;
+    const paginated = documents.slice(start, start + limit);
+
+    res.status(200).json({
+      success: true,
+      count: paginated.length,
+      total,
+      pages: Math.ceil(total / limit),
+      currentPage: page,
+      data: paginated
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get vendor activity logs
+// @route   GET /api/vendors/:id/activity-logs
+// @access  Private (Admin)
+exports.getVendorActivityLogs = async (req, res, next) => {
+  try {
+    const vendor = await Vendor.findById(req.params.id)
+      .populate('activityLogs.performedBy', 'name email');
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor not found'
+      });
+    }
+
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 20;
+    const action = req.query.action;
+
+    let logs = Array.isArray(vendor.activityLogs) ? vendor.activityLogs : [];
+    if (action) {
+      logs = logs.filter((log) => log.action === action);
+    }
+
+    const total = logs.length;
+    const start = (page - 1) * limit;
+    const paginated = logs.slice(start, start + limit);
+
+    res.status(200).json({
+      success: true,
+      count: paginated.length,
+      total,
+      pages: Math.ceil(total / limit),
+      currentPage: page,
+      data: paginated
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get vendor performance overview
+// @route   GET /api/vendors/:id/performance
+// @access  Private (Admin)
+exports.getVendorPerformanceOverview = async (req, res, next) => {
+  try {
+    const vendor = await Vendor.findById(req.params.id);
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor not found'
+      });
+    }
+
+    const productCount = await Product.countDocuments({ vendor: vendor._id, isActive: true });
+    const reviewSummary = await Review.aggregate([
+      { $match: { vendor: vendor._id, isApproved: true, isActive: true } },
+      {
+        $group: {
+          _id: null,
+          totalReviews: { $sum: 1 },
+          averageRating: { $avg: '$rating' }
+        }
+      }
+    ]);
+
+    const orderSummary = await Order.aggregate([
+      { $unwind: '$items' },
+      { $match: { 'items.vendor': vendor._id } },
+      {
+        $group: {
+          _id: null,
+          totalOrders: { $sum: 1 },
+          completedOrders: {
+            $sum: {
+              $cond: [{ $in: ['$items.status', ['delivered', 'confirmed']] }, 1, 0]
+            }
+          },
+          totalSales: { $sum: '$items.quantity' },
+          totalRevenue: { $sum: '$items.subtotal' }
+        }
+      }
+    ]);
+
+    const reviewData = reviewSummary[0] || { totalReviews: 0, averageRating: 0 };
+    const orderData = orderSummary[0] || { totalOrders: 0, completedOrders: 0, totalSales: 0, totalRevenue: 0 };
+
+    res.status(200).json({
+      success: true,
+      data: {
+        vendor: {
+          id: vendor._id,
+          storeName: vendor.storeName,
+          status: vendor.status,
+          accountStatus: vendor.accountStatus
+        },
+        metrics: {
+          totalProducts: productCount,
+          totalOrders: orderData.totalOrders,
+          completedOrders: orderData.completedOrders,
+          totalSales: orderData.totalSales,
+          totalRevenue: orderData.totalRevenue,
+          totalReviews: reviewData.totalReviews,
+          averageRating: Number((reviewData.averageRating || 0).toFixed(2))
+        }
+      }
     });
   } catch (error) {
     next(error);
@@ -258,7 +855,6 @@ exports.getVendorAnalytics = async (req, res, next) => {
       });
     }
 
-    // Check ownership
     if (vendor.user.toString() !== req.user.id && req.user.role !== 'admin') {
       return res.status(403).json({
         success: false,
@@ -266,10 +862,7 @@ exports.getVendorAnalytics = async (req, res, next) => {
       });
     }
 
-    // Get product count
     const productCount = await Product.countDocuments({ vendor: vendor._id });
-
-    // Get active products
     const activeProducts = await Product.countDocuments({
       vendor: vendor._id,
       status: 'active'
@@ -299,7 +892,6 @@ exports.getVendorAnalytics = async (req, res, next) => {
 exports.approveVendor = async (req, res, next) => {
   try {
     const vendor = await Vendor.findById(req.params.id).populate('user');
-
     if (!vendor) {
       return res.status(404).json({
         success: false,
@@ -307,12 +899,17 @@ exports.approveVendor = async (req, res, next) => {
       });
     }
 
-    vendor.status = 'approved';
-    vendor.approvedAt = Date.now();
-    vendor.approvedBy = req.user.id;
+    const user = await User.findById(vendor.user._id);
+    await applyVendorAccountStatus(vendor, user, 'active', null, req.user.id);
+
+    addActivityLog(vendor, {
+      action: 'vendor.approved',
+      message: 'Vendor approved by admin',
+      performedBy: req.user.id,
+      performedByRole: req.user.role
+    });
     await vendor.save();
 
-    // Send approval email
     try {
       await sendEmail({
         email: vendor.email,
@@ -347,7 +944,26 @@ exports.rejectVendor = async (req, res, next) => {
     }
 
     vendor.status = 'rejected';
-    vendor.rejectionReason = req.body.reason;
+    vendor.accountStatus = 'suspended';
+    vendor.rejectionReason = req.body.reason || 'Rejected by admin';
+    vendor.statusUpdatedAt = new Date();
+    vendor.statusUpdatedBy = req.user.id;
+    vendor.isActive = false;
+
+    const user = await User.findById(vendor.user);
+    if (user) {
+      user.isActive = false;
+      user.isBanned = false;
+      await user.save();
+    }
+
+    addActivityLog(vendor, {
+      action: 'vendor.rejected',
+      message: 'Vendor rejected by admin',
+      metadata: { reason: req.body.reason || null },
+      performedBy: req.user.id,
+      performedByRole: req.user.role
+    });
     await vendor.save();
 
     res.status(200).json({

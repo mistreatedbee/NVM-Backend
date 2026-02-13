@@ -90,7 +90,6 @@ const transactionSchema = new mongoose.Schema({
 });
 
 // Indexes
-transactionSchema.index({ transactionId: 1 });
 transactionSchema.index({ order: 1 });
 transactionSchema.index({ vendor: 1 });
 transactionSchema.index({ customer: 1 });

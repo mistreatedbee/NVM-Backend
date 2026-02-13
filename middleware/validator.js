@@ -63,6 +63,28 @@ exports.productValidation = [
     .isIn(['physical', 'digital', 'service']).withMessage('Invalid product type')
 ];
 
+exports.productReportValidation = [
+  body('reason')
+    .notEmpty().withMessage('Report reason is required')
+    .isIn(['counterfeit', 'misleading', 'prohibited', 'pricing', 'abuse', 'other'])
+    .withMessage('Invalid report reason'),
+  body('details')
+    .optional()
+    .trim()
+    .isLength({ max: 500 }).withMessage('Report details cannot exceed 500 characters')
+];
+
+exports.productModerationValidation = [
+  body('action')
+    .notEmpty().withMessage('Moderation action is required')
+    .isIn(['approve', 'reject', 'resolve-reports', 'dismiss-reports'])
+    .withMessage('Invalid moderation action'),
+  body('reason')
+    .optional()
+    .trim()
+    .isLength({ max: 500 }).withMessage('Reason cannot exceed 500 characters')
+];
+
 // Vendor validation
 exports.vendorValidation = [
   body('storeName')
@@ -136,15 +158,132 @@ exports.vendorValidation = [
     .trim()
 ];
 
+exports.vendorStatusValidation = [
+  body('accountStatus')
+    .notEmpty().withMessage('Account status is required')
+    .isIn(['active', 'pending', 'suspended', 'banned']).withMessage('Invalid account status'),
+  body('reason')
+    .optional()
+    .trim()
+    .isLength({ max: 500 }).withMessage('Reason cannot exceed 500 characters')
+];
+
+exports.adminVendorUpdateValidation = [
+  body('storeName').optional().trim().isLength({ min: 2, max: 100 }).withMessage('Store name must be between 2 and 100 characters'),
+  body('description').optional().trim().isLength({ min: 5, max: 1000 }).withMessage('Description must be between 5 and 1000 characters'),
+  body('category').optional().isIn(['fashion', 'electronics', 'food', 'services', 'health', 'beauty', 'home', 'sports', 'books', 'art', 'other']).withMessage('Invalid category'),
+  body('businessType').optional().isIn(['individual', 'business', 'freelancer']).withMessage('Invalid business type'),
+  body('email').optional().trim().isEmail().withMessage('Please provide a valid email'),
+  body('phone').optional().trim().notEmpty().withMessage('Phone cannot be empty'),
+  body('website').optional().trim(),
+  body('address').optional().isObject().withMessage('Address must be an object'),
+  body('socialMedia').optional().isObject().withMessage('Social media must be an object'),
+  body('bankDetails').optional().isObject().withMessage('Bank details must be an object'),
+  body('settings').optional().isObject().withMessage('Settings must be an object')
+];
+
+exports.vendorDocumentValidation = [
+  body('type')
+    .notEmpty().withMessage('Document type is required')
+    .isIn(['business-registration', 'tax-certificate', 'compliance', 'identity', 'bank-proof', 'other'])
+    .withMessage('Invalid document type'),
+  body('name')
+    .trim()
+    .notEmpty().withMessage('Document name is required')
+    .isLength({ max: 150 }).withMessage('Document name cannot exceed 150 characters'),
+  body('url')
+    .optional()
+    .trim()
+    .isURL().withMessage('Document URL must be valid'),
+  body('expiresAt')
+    .optional()
+    .isISO8601().withMessage('Expiration date must be a valid ISO date')
+];
+
+exports.vendorDocumentReviewValidation = [
+  body('action')
+    .notEmpty().withMessage('Review action is required')
+    .isIn(['verify', 'reject']).withMessage('Invalid action'),
+  body('reason')
+    .optional()
+    .trim()
+    .isLength({ max: 500 }).withMessage('Reason cannot exceed 500 characters')
+];
+
+exports.vendorComplianceValidation = [
+  body('checkType')
+    .notEmpty().withMessage('Compliance check type is required')
+    .isIn(['kyc', 'business-license', 'tax', 'banking', 'policy', 'other'])
+    .withMessage('Invalid compliance check type'),
+  body('status')
+    .notEmpty().withMessage('Compliance status is required')
+    .isIn(['pending', 'passed', 'failed']).withMessage('Invalid compliance status'),
+  body('notes')
+    .optional()
+    .trim()
+    .isLength({ max: 1000 }).withMessage('Notes cannot exceed 1000 characters'),
+  body('nextReviewAt')
+    .optional()
+    .isISO8601().withMessage('Next review date must be a valid ISO date')
+];
+
 // Review validation
 exports.reviewValidation = [
+  body('product')
+    .optional()
+    .isMongoId().withMessage('Invalid product ID'),
+  body('vendor')
+    .optional()
+    .isMongoId().withMessage('Invalid vendor ID'),
+  body('order')
+    .optional()
+    .isMongoId().withMessage('Invalid order ID'),
   body('rating')
     .notEmpty().withMessage('Rating is required')
     .isInt({ min: 1, max: 5 }).withMessage('Rating must be between 1 and 5'),
+  body('title')
+    .optional()
+    .trim()
+    .isLength({ max: 100 }).withMessage('Title cannot exceed 100 characters'),
   body('comment')
     .trim()
     .notEmpty().withMessage('Comment is required')
-    .isLength({ max: 1000 }).withMessage('Comment cannot exceed 1000 characters')
+    .isLength({ max: 1000 }).withMessage('Comment cannot exceed 1000 characters'),
+  body('images')
+    .optional()
+    .isArray({ max: 10 }).withMessage('You can upload up to 10 images'),
+  body('videos')
+    .optional()
+    .isArray({ max: 3 }).withMessage('You can upload up to 3 videos')
+];
+
+exports.reviewResponseValidation = [
+  body('comment')
+    .trim()
+    .notEmpty().withMessage('Response comment is required')
+    .isLength({ max: 1000 }).withMessage('Response cannot exceed 1000 characters')
+];
+
+exports.reviewReportValidation = [
+  body('reason')
+    .notEmpty().withMessage('Report reason is required')
+    .isIn(['spam', 'abuse', 'fake', 'off-topic', 'copyright', 'other'])
+    .withMessage('Invalid report reason'),
+  body('details')
+    .optional()
+    .trim()
+    .isLength({ max: 500 }).withMessage('Report details cannot exceed 500 characters')
+];
+
+exports.reviewModerationValidation = [
+  body('action')
+    .notEmpty().withMessage('Action is required')
+    .isIn(['approve', 'reject', 'restore', 'resolve-reports', 'dismiss-reports'])
+    .withMessage('Invalid moderation action'),
+  body('reason')
+    .optional()
+    .trim()
+    .isLength({ max: 500 }).withMessage('Reason cannot exceed 500 characters')
 ];
 
 // Order validation
@@ -177,6 +316,11 @@ exports.orderValidation = [
 exports.validateId = [
   param('id')
     .isMongoId().withMessage('Invalid ID format')
+];
+
+exports.validateDocumentId = [
+  param('docId')
+    .isMongoId().withMessage('Invalid document ID format')
 ];
 
 // Pagination validation

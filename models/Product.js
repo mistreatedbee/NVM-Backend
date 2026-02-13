@@ -176,12 +176,87 @@ const productSchema = new mongoose.Schema({
   // Moderation
   isApproved: {
     type: Boolean,
-    default: true
+    default: false
   },
   moderatedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
+  moderationReason: String,
+  moderatedAt: Date,
+  moderationStatus: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: 'pending'
+  },
+  moderationHistory: [{
+    action: {
+      type: String,
+      enum: ['submitted', 'approved', 'rejected', 'resubmitted'],
+      required: true
+    },
+    reason: String,
+    performedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    performedByRole: String,
+    createdAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
+  reports: [{
+    reporter: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true
+    },
+    reason: {
+      type: String,
+      enum: ['counterfeit', 'misleading', 'prohibited', 'pricing', 'abuse', 'other'],
+      required: true
+    },
+    details: {
+      type: String,
+      maxlength: [500, 'Report details cannot be more than 500 characters']
+    },
+    status: {
+      type: String,
+      enum: ['open', 'resolved', 'dismissed'],
+      default: 'open'
+    },
+    handledBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    handledAt: Date,
+    createdAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
+  reportCount: {
+    type: Number,
+    default: 0
+  },
+  activityLogs: [{
+    action: {
+      type: String,
+      required: true
+    },
+    message: String,
+    metadata: mongoose.Schema.Types.Mixed,
+    performedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    performedByRole: String,
+    createdAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
   
   isActive: {
     type: Boolean,
@@ -192,14 +267,16 @@ const productSchema = new mongoose.Schema({
 });
 
 // Indexes
-productSchema.index({ slug: 1 });
 productSchema.index({ vendor: 1 });
 productSchema.index({ category: 1 });
 productSchema.index({ status: 1 });
+productSchema.index({ moderationStatus: 1 });
 productSchema.index({ price: 1 });
 productSchema.index({ rating: -1 });
 productSchema.index({ totalSales: -1 });
 productSchema.index({ createdAt: -1 });
+productSchema.index({ reportCount: -1 });
+productSchema.index({ 'reports.status': 1 });
 productSchema.index({ name: 'text', description: 'text', tags: 'text' });
 
 // Generate slug before saving
