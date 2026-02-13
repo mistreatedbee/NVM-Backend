@@ -5,6 +5,10 @@ const {
   getVendor,
   getAdminVendorDetails,
   getVendorBySlug,
+  getPublicVendorProfileBySlug,
+  getVendorProfileByVendorId,
+  upsertVendorProfile,
+  uploadVendorProfileImages,
   getAllVendors,
   getAdminVendors,
   updateVendor,
@@ -29,7 +33,9 @@ const {
   vendorDocumentValidation,
   vendorDocumentReviewValidation,
   vendorComplianceValidation,
+  vendorProfileValidation,
   validateId,
+  validateVendorId,
   validateDocumentId,
   validate,
   paginationValidation
@@ -48,6 +54,18 @@ router.get('/admin/:id', authenticate, isAdmin, validateId, validate, getAdminVe
 // Get my vendor profile - must be authenticated
 router.get('/me/profile', authenticate, getMyVendorProfile);
 router.get('/slug/:slug', getVendorBySlug);
+router.get('/:vendorId([0-9a-fA-F]{24})/profile', authenticate, validateVendorId, validate, getVendorProfileByVendorId);
+router.post('/:vendorId([0-9a-fA-F]{24})/profile', authenticate, validateVendorId, vendorProfileValidation, validate, upsertVendorProfile);
+router.put('/:vendorId([0-9a-fA-F]{24})/profile', authenticate, validateVendorId, vendorProfileValidation, validate, upsertVendorProfile);
+router.put(
+  '/:vendorId([0-9a-fA-F]{24})/profile/images',
+  authenticate,
+  validateVendorId,
+  upload.fields([{ name: 'profileImage', maxCount: 1 }, { name: 'coverImage', maxCount: 1 }]),
+  validate,
+  uploadVendorProfileImages
+);
+router.get('/:slug/profile', getPublicVendorProfileBySlug);
 router.get('/:id', validateId, validate, getVendor);
 router.put('/:id', authenticate, validateId, validate, updateVendor);
 router.put('/:id/admin-profile', authenticate, isAdmin, validateId, adminVendorUpdateValidation, validate, adminUpdateVendorProfile);

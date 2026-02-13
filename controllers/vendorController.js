@@ -77,6 +77,98 @@ async function applyVendorAccountStatus(vendor, user, accountStatus, reason, act
   await user.save();
 }
 
+function toSlug(value = '') {
+  return value
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function isPublicVendor(vendor) {
+  const hasLegacyStatus = typeof vendor.accountStatus === 'undefined';
+  return vendor &&
+    vendor.status === 'approved' &&
+    vendor.isActive === true &&
+    (vendor.accountStatus === 'active' || hasLegacyStatus);
+}
+
+function buildVendorPublicProfile(vendor) {
+  const location = vendor.location || {};
+  const legacyAddress = vendor.address || {};
+  const socialLinks = vendor.socialLinks || {};
+  const socialMedia = vendor.socialMedia || {};
+
+  return {
+    _id: vendor._id,
+    vendorId: vendor._id,
+    storeName: vendor.storeName,
+    businessName: vendor.storeName,
+    slug: vendor.usernameSlug || vendor.slug,
+    usernameSlug: vendor.usernameSlug || vendor.slug,
+    profileImageUrl: vendor.profileImage?.url || vendor.logo?.url || '',
+    coverImageUrl: vendor.coverImage?.url || vendor.banner?.url || '',
+    profileImage: vendor.profileImage || vendor.logo || {},
+    coverImage: vendor.coverImage || vendor.banner || {},
+    bio: vendor.bio || vendor.description || '',
+    about: vendor.about || vendor.description || '',
+    category: vendor.category || '',
+    businessType: vendor.businessType || '',
+    phoneNumber: vendor.privacy?.showPhone === false ? null : (vendor.phone || ''),
+    email: vendor.privacy?.showEmail === false ? null : (vendor.email || ''),
+    website: vendor.website || socialLinks.website || '',
+    location: {
+      country: location.country || legacyAddress.country || '',
+      state: location.state || legacyAddress.state || '',
+      city: location.city || legacyAddress.city || '',
+      suburb: location.suburb || '',
+      addressLine: location.addressLine || legacyAddress.street || ''
+    },
+    socialLinks: {
+      whatsapp: socialLinks.whatsapp || '',
+      facebook: socialLinks.facebook || socialMedia.facebook || '',
+      instagram: socialLinks.instagram || socialMedia.instagram || '',
+      tiktok: socialLinks.tiktok || '',
+      website: socialLinks.website || vendor.website || ''
+    },
+    businessHours: vendor.businessHours || '',
+    policies: {
+      returns: vendor.policies?.returns || vendor.settings?.returnPolicy || '',
+      shipping: vendor.policies?.shipping || vendor.settings?.shippingPolicy || ''
+    },
+    verificationStatus: vendor.verificationStatus || 'pending',
+    rating: vendor.rating || 0,
+    totalReviews: vendor.totalReviews || 0,
+    totalProducts: vendor.totalProducts || 0,
+    createdAt: vendor.createdAt,
+    updatedAt: vendor.updatedAt
+  };
+}
+
+async function uploadVendorImage(buffer, folderSuffix, transformation) {
+  const result = await new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder: `nvm/vendors/${folderSuffix}`,
+        resource_type: 'image',
+        transformation
+      },
+      (error, uploadResult) => {
+        if (error) reject(error);
+        else resolve(uploadResult);
+      }
+    );
+    uploadStream.end(buffer);
+  });
+
+  return {
+    public_id: result.public_id,
+    url: result.secure_url
+  };
+}
+
 // @desc    Create vendor profile
 // @route   POST /api/vendors
 // @access  Private (Authenticated User)
@@ -95,6 +187,19 @@ exports.createVendor = async (req, res, next) => {
       user: req.user.id,
       accountStatus: 'pending'
     };
+
+    if (!vendorData.usernameSlug && vendorData.storeName) {
+      vendorData.usernameSlug = toSlug(vendorData.storeName);
+    }
+
+    if (!vendorData.location && vendorData.address) {
+      vendorData.location = {
+        country: vendorData.address.country,
+        state: vendorData.address.state,
+        city: vendorData.address.city,
+        addressLine: vendorData.address.street
+      };
+    }
 
     if (req.file) {
       try {
@@ -161,30 +266,7 @@ exports.getVendor = async (req, res, next) => {
       });
     }
 
-    const safeVendor = {
-      _id: vendor._id,
-      storeName: vendor.storeName,
-      slug: vendor.slug,
-      description: vendor.description,
-      logo: vendor.logo,
-      banner: vendor.banner,
-      category: vendor.category,
-      businessType: vendor.businessType,
-      website: vendor.website,
-      socialMedia: vendor.socialMedia,
-      address: vendor.address,
-      rating: vendor.rating,
-      totalReviews: vendor.totalReviews,
-      totalProducts: vendor.totalProducts,
-      totalSales: vendor.totalSales,
-      totalRevenue: vendor.totalRevenue,
-      topRatedBadge: vendor.topRatedBadge,
-      topRatedSince: vendor.topRatedSince,
-      status: vendor.status,
-      accountStatus: vendor.accountStatus,
-      createdAt: vendor.createdAt,
-      updatedAt: vendor.updatedAt
-    };
+    const safeVendor = buildVendorPublicProfile(vendor);
 
     res.status(200).json({
       success: true,
@@ -230,10 +312,12 @@ exports.getAdminVendorDetails = async (req, res, next) => {
 // @access  Public
 exports.getVendorBySlug = async (req, res, next) => {
   try {
-    const vendor = await Vendor.findOne({ slug: req.params.slug })
+    const vendor = await Vendor.findOne({
+      $or: [{ slug: req.params.slug }, { usernameSlug: req.params.slug }]
+    })
       .populate('user', 'name email avatar');
 
-    if (!vendor) {
+    if (!vendor || !isPublicVendor(vendor)) {
       return res.status(404).json({
         success: false,
         message: 'Vendor not found'
@@ -242,7 +326,7 @@ exports.getVendorBySlug = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      data: vendor
+      data: buildVendorPublicProfile(vendor)
     });
   } catch (error) {
     next(error);
@@ -284,6 +368,58 @@ exports.getAllVendors = async (req, res, next) => {
 
     const vendors = await Vendor.find(query)
       .populate('user', 'name avatar')
+      .sort(sort)
+      .skip(skip)
+      .limit(limit);
+
+    const total = await Vendor.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      count: vendors.length,
+      total,
+      pages: Math.ceil(total / limit),
+      currentPage: page,
+      data: vendors.map((vendor) => buildVendorPublicProfile(vendor))
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get all vendors for admin
+// @route   GET /api/vendors/admin/all
+// @access  Private (Admin)
+exports.getAdminVendors = async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 20;
+    const skip = (page - 1) * limit;
+
+    const query = {};
+    if (req.query.status && req.query.status !== 'all') {
+      query.status = req.query.status;
+    }
+    if (req.query.accountStatus && req.query.accountStatus !== 'all') {
+      query.accountStatus = req.query.accountStatus;
+    }
+    if (req.query.category) {
+      query.category = req.query.category;
+    }
+    if (req.query.search) {
+      query.$text = { $search: req.query.search };
+    }
+
+    let sort = '-createdAt';
+    if (req.query.sort === 'rating') {
+      sort = '-rating';
+    } else if (req.query.sort === 'sales') {
+      sort = '-totalSales';
+    }
+
+    const vendors = await Vendor.find(query)
+      .populate('user', 'name email avatar isActive isBanned')
+      .populate('statusUpdatedBy', 'name email')
       .sort(sort)
       .skip(skip)
       .limit(limit);
@@ -838,6 +974,249 @@ exports.getMyVendorProfile = async (req, res, next) => {
     res.status(200).json({
       success: true,
       data: vendor
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get public storefront profile by slug
+// @route   GET /api/vendors/:slug/profile
+// @access  Public
+exports.getPublicVendorProfileBySlug = async (req, res, next) => {
+  try {
+    const vendor = await Vendor.findOne({
+      $or: [{ usernameSlug: req.params.slug }, { slug: req.params.slug }]
+    }).populate('user', 'name avatar');
+
+    if (!vendor || !isPublicVendor(vendor)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor profile not found'
+      });
+    }
+
+    const profile = buildVendorPublicProfile(vendor);
+
+    res.status(200).json({
+      success: true,
+      data: profile
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get storefront profile by vendor ID (owner/admin)
+// @route   GET /api/vendors/:vendorId/profile
+// @access  Private (Vendor/Admin)
+exports.getVendorProfileByVendorId = async (req, res, next) => {
+  try {
+    const vendor = await Vendor.findById(req.params.vendorId).populate('user', 'name email avatar');
+
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor profile not found'
+      });
+    }
+
+    if (vendor.user._id.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to view this vendor profile'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: vendor
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Create/update storefront profile by vendor ID
+// @route   POST|PUT /api/vendors/:vendorId/profile
+// @access  Private (Vendor/Admin)
+exports.upsertVendorProfile = async (req, res, next) => {
+  try {
+    const vendor = await Vendor.findById(req.params.vendorId);
+
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor profile not found'
+      });
+    }
+
+    if (vendor.user.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to update this vendor profile'
+      });
+    }
+
+    const nextSlug = req.body.usernameSlug
+      ? toSlug(req.body.usernameSlug)
+      : (req.body.storeName ? toSlug(req.body.storeName) : vendor.usernameSlug || vendor.slug);
+
+    const existingSlugOwner = await Vendor.findOne({
+      _id: { $ne: vendor._id },
+      $or: [{ usernameSlug: nextSlug }, { slug: nextSlug }]
+    });
+
+    if (existingSlugOwner) {
+      return res.status(400).json({
+        success: false,
+        message: 'This store URL is already taken. Choose a different slug.'
+      });
+    }
+
+    const fields = [
+      'storeName',
+      'bio',
+      'about',
+      'description',
+      'category',
+      'businessType',
+      'phone',
+      'email',
+      'website',
+      'businessHours',
+      'socialLinks',
+      'privacy',
+      'location',
+      'address',
+      'policies'
+    ];
+
+    fields.forEach((field) => {
+      if (Object.prototype.hasOwnProperty.call(req.body, field)) {
+        vendor[field] = req.body[field];
+      }
+    });
+
+    vendor.usernameSlug = nextSlug;
+    vendor.slug = nextSlug;
+
+    if (!vendor.description && vendor.about) {
+      vendor.description = vendor.about;
+    }
+    if (!vendor.bio && vendor.description) {
+      vendor.bio = vendor.description;
+    }
+
+    // Keep old fields in sync for legacy UI.
+    if (vendor.location) {
+      vendor.address = {
+        ...(vendor.address || {}),
+        country: vendor.location.country || vendor.address?.country || '',
+        state: vendor.location.state || vendor.address?.state || '',
+        city: vendor.location.city || vendor.address?.city || '',
+        street: vendor.location.addressLine || vendor.address?.street || '',
+        zipCode: vendor.address?.zipCode || ''
+      };
+    }
+    if (vendor.socialLinks) {
+      vendor.socialMedia = {
+        ...(vendor.socialMedia || {}),
+        facebook: vendor.socialLinks.facebook || vendor.socialMedia?.facebook || '',
+        instagram: vendor.socialLinks.instagram || vendor.socialMedia?.instagram || ''
+      };
+      if (vendor.socialLinks.website) {
+        vendor.website = vendor.socialLinks.website;
+      }
+    }
+
+    await vendor.save();
+
+    addActivityLog(vendor, {
+      action: 'vendor.storefront.updated',
+      message: 'Vendor storefront profile updated',
+      metadata: { updatedFields: Object.keys(req.body || {}) },
+      performedBy: req.user.id,
+      performedByRole: req.user.role
+    });
+    await vendor.save();
+
+    res.status(200).json({
+      success: true,
+      data: vendor
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Upload vendor storefront images
+// @route   PUT /api/vendors/:vendorId/profile/images
+// @access  Private (Vendor/Admin)
+exports.uploadVendorProfileImages = async (req, res, next) => {
+  try {
+    const vendor = await Vendor.findById(req.params.vendorId);
+
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor profile not found'
+      });
+    }
+
+    if (vendor.user.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to update this vendor profile'
+      });
+    }
+
+    const profileFile = req.files?.profileImage?.[0];
+    const coverFile = req.files?.coverImage?.[0];
+
+    if (!profileFile && !coverFile) {
+      return res.status(400).json({
+        success: false,
+        message: 'No images uploaded. Provide profileImage and/or coverImage.'
+      });
+    }
+
+    if (profileFile) {
+      const profileImage = await uploadVendorImage(profileFile.buffer, 'profile', [
+        { width: 600, height: 600, crop: 'limit' },
+        { quality: 'auto' },
+        { fetch_format: 'auto' }
+      ]);
+      vendor.profileImage = profileImage;
+      vendor.logo = profileImage;
+    }
+
+    if (coverFile) {
+      const coverImage = await uploadVendorImage(coverFile.buffer, 'cover', [
+        { width: 1800, height: 700, crop: 'limit' },
+        { quality: 'auto' },
+        { fetch_format: 'auto' }
+      ]);
+      vendor.coverImage = coverImage;
+      vendor.banner = coverImage;
+    }
+
+    await vendor.save();
+
+    addActivityLog(vendor, {
+      action: 'vendor.storefront.images.updated',
+      message: 'Vendor storefront images updated',
+      performedBy: req.user.id,
+      performedByRole: req.user.role
+    });
+    await vendor.save();
+
+    res.status(200).json({
+      success: true,
+      data: {
+        profileImage: vendor.profileImage || vendor.logo,
+        coverImage: vendor.coverImage || vendor.banner
+      }
     });
   } catch (error) {
     next(error);

@@ -18,16 +18,38 @@ const vendorSchema = new mongoose.Schema({
     unique: true,
     lowercase: true
   },
+  usernameSlug: {
+    type: String,
+    unique: true,
+    sparse: true,
+    lowercase: true
+  },
   description: {
     type: String,
     required: [true, 'Please provide a store description'],
     maxlength: [1000, 'Description cannot be more than 1000 characters']
   },
+  about: {
+    type: String,
+    maxlength: [2000, 'About cannot be more than 2000 characters']
+  },
+  bio: {
+    type: String,
+    maxlength: [1000, 'Bio cannot be more than 1000 characters']
+  },
   logo: {
     public_id: String,
     url: String
   },
+  profileImage: {
+    public_id: String,
+    url: String
+  },
   banner: {
+    public_id: String,
+    url: String
+  },
+  coverImage: {
     public_id: String,
     url: String
   },
@@ -70,6 +92,20 @@ const vendorSchema = new mongoose.Schema({
     twitter: String,
     instagram: String,
     linkedin: String
+  },
+  socialLinks: {
+    whatsapp: String,
+    facebook: String,
+    instagram: String,
+    tiktok: String,
+    website: String
+  },
+  location: {
+    country: String,
+    state: String,
+    city: String,
+    suburb: String,
+    addressLine: String
   },
   
   // Banking Information (for EFT payments) - Optional but recommended
@@ -249,6 +285,26 @@ const vendorSchema = new mongoose.Schema({
     shippingPolicy: String,
     termsAndConditions: String
   },
+  businessHours: String,
+  policies: {
+    returns: String,
+    shipping: String
+  },
+  verificationStatus: {
+    type: String,
+    enum: ['pending', 'verified'],
+    default: 'pending'
+  },
+  privacy: {
+    showPhone: {
+      type: Boolean,
+      default: true
+    },
+    showEmail: {
+      type: Boolean,
+      default: true
+    }
+  },
   
   // Subscription/Features
   isPremium: {
@@ -271,16 +327,29 @@ vendorSchema.index({ accountStatus: 1 });
 vendorSchema.index({ category: 1 });
 vendorSchema.index({ rating: -1 });
 vendorSchema.index({ totalSales: -1 });
+vendorSchema.index({ 'location.city': 1, 'location.state': 1 });
 vendorSchema.index({ storeName: 'text', description: 'text' });
 vendorSchema.index({ 'documents.status': 1 });
 vendorSchema.index({ 'complianceChecks.status': 1 });
 
 // Generate slug before saving
 vendorSchema.pre('save', function(next) {
-  if (this.isModified('storeName')) {
-    this.slug = this.storeName
+  if (this.isModified('storeName') || !this.slug) {
+    const generatedSlug = this.storeName
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    this.slug = generatedSlug;
+    if (!this.usernameSlug || this.isModified('storeName')) {
+      this.usernameSlug = generatedSlug;
+    }
+  }
+
+  if (this.isModified('usernameSlug') && this.usernameSlug) {
+    this.usernameSlug = this.usernameSlug
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, '-')
+      .replace(/-+/g, '-')
       .replace(/^-+|-+$/g, '');
   }
   next();

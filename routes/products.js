@@ -22,6 +22,7 @@ const {
   productReportValidation,
   productModerationValidation,
   validateId,
+  validateVendorId,
   validate,
   paginationValidation
 } = require('../middleware/validator');
@@ -33,7 +34,7 @@ router.get('/admin/reported', authenticate, isAdmin, paginationValidation, valid
 router.get('/', paginationValidation, validate, getAllProducts);
 router.get('/featured', getFeaturedProducts);
 router.get('/slug/:slug', getProductBySlug);
-router.get('/vendor/:vendorId', validateId, validate, paginationValidation, validate, getVendorProducts);
+router.get('/vendor/:vendorId', validateVendorId, validate, paginationValidation, validate, getVendorProducts);
 router.get('/:id/audit', authenticate, isAdmin, validateId, validate, getProductAuditTrail);
 router.get('/:id', validateId, validate, getProduct);
 router.put('/:id', authenticate, isVendor, validateId, validate, updateProduct);
