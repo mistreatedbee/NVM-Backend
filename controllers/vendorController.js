@@ -148,6 +148,15 @@ function buildVendorPublicProfile(vendor) {
 }
 
 async function uploadVendorImage(buffer, folderSuffix, transformation) {
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+  const apiKey = process.env.CLOUDINARY_API_KEY;
+  const apiSecret = process.env.CLOUDINARY_API_SECRET;
+  if (!cloudName || !apiKey || !apiSecret) {
+    const configError = new Error('Image upload service is not configured on the server.');
+    configError.statusCode = 503;
+    throw configError;
+  }
+
   const result = await new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
       {
@@ -156,7 +165,11 @@ async function uploadVendorImage(buffer, folderSuffix, transformation) {
         transformation
       },
       (error, uploadResult) => {
-        if (error) reject(error);
+        if (error) {
+          const uploadError = new Error(`Image upload failed: ${error.message || 'unknown Cloudinary error'}`);
+          uploadError.statusCode = 502;
+          reject(uploadError);
+        }
         else resolve(uploadResult);
       }
     );

@@ -35,6 +35,15 @@ const errorHandler = (err, req, res, next) => {
     error = { message, statusCode: 401 };
   }
 
+  // Multer file upload errors
+  if (err.name === 'MulterError') {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      error = { message: 'Image file size must be 5MB or less', statusCode: 400 };
+    } else {
+      error = { message: `Upload failed: ${err.message}`, statusCode: 400 };
+    }
+  }
+
   res.status(error.statusCode || 500).json({
     success: false,
     message: error.message || 'Server Error',
