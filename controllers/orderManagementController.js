@@ -1,7 +1,9 @@
 const Order = require('../models/Order');
 const Vendor = require('../models/Vendor');
 const Product = require('../models/Product');
+const User = require('../models/User');
 const cloudinary = require('../utils/cloudinary');
+const { notifyUser } = require('../services/notificationService');
 
 // @desc    Upload payment proof
 // @route   POST /api/orders/:orderId/payment-proof
@@ -52,7 +54,22 @@ exports.uploadPaymentProof = async (req, res, next) => {
 
     await order.save();
 
-    // TODO: Send notification to vendors
+    const vendorIds = [...new Set(order.items.map((item) => String(item.vendor)))];
+    for (const vendorId of vendorIds) {
+      const vendor = await Vendor.findById(vendorId).select('user');
+      if (!vendor?.user) continue;
+      const vendorUser = await User.findById(vendor.user).select('name email role');
+      if (!vendorUser) continue;
+
+      await notifyUser({
+        user: vendorUser,
+        type: 'ORDER',
+        title: 'Payment proof uploaded',
+        message: `Customer uploaded proof for order ${order.orderNumber}.`,
+        linkUrl: `/vendor/orders/${order._id}`,
+        metadata: { event: 'order.payment-proof-uploaded', orderId: order._id.toString() }
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -98,7 +115,23 @@ exports.confirmPayment = async (req, res, next) => {
 
     await order.save();
 
-    // TODO: Send confirmation notification to customer
+    const customer = await User.findById(order.customer).select('name email role');
+    if (customer) {
+      await notifyUser({
+        user: customer,
+        type: 'ORDER',
+        title: 'Payment confirmed',
+        message: `Payment for order ${order.orderNumber} was confirmed.`,
+        linkUrl: `/orders/${order._id}/track`,
+        metadata: { event: 'order.payment-confirmed', orderId: order._id.toString() },
+        emailTemplate: 'order_status',
+        emailContext: {
+          orderId: order.orderNumber,
+          status: 'confirmed',
+          actionLinks: [{ label: 'Track order', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/orders/${order._id}/track` }]
+        }
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -143,7 +176,23 @@ exports.rejectPayment = async (req, res, next) => {
 
     await order.save();
 
-    // TODO: Send notification to customer
+    const customer = await User.findById(order.customer).select('name email role');
+    if (customer) {
+      await notifyUser({
+        user: customer,
+        type: 'ORDER',
+        title: 'Payment rejected',
+        message: `Payment for order ${order.orderNumber} was rejected: ${reason}`,
+        linkUrl: `/orders/${order._id}/track`,
+        metadata: { event: 'order.payment-rejected', orderId: order._id.toString(), reason },
+        emailTemplate: 'order_status',
+        emailContext: {
+          orderId: order.orderNumber,
+          status: 'payment rejected',
+          actionLinks: [{ label: 'View order', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/orders/${order._id}/track` }]
+        }
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -194,7 +243,23 @@ exports.updateOrderStatus = async (req, res, next) => {
 
     await order.save();
 
-    // TODO: Send notification to customer
+    const customer = await User.findById(order.customer).select('name email role');
+    if (customer) {
+      await notifyUser({
+        user: customer,
+        type: 'ORDER',
+        title: `Order status: ${status}`,
+        message: `Order ${order.orderNumber} is now ${status}.`,
+        linkUrl: `/orders/${order._id}/track`,
+        metadata: { event: 'order.status-updated', orderId: order._id.toString(), status },
+        emailTemplate: 'order_status',
+        emailContext: {
+          orderId: order.orderNumber,
+          status,
+          actionLinks: [{ label: 'Track order', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/orders/${order._id}/track` }]
+        }
+      });
+    }
 
     res.status(200).json({
       success: true,

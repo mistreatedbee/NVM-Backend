@@ -1,6 +1,8 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const Order = require('../models/Order');
 const Transaction = require('../models/Transaction');
+const User = require('../models/User');
+const { notifyUser } = require('../services/notificationService');
 
 // @desc    Create payment intent (Stripe)
 // @route   POST /api/payments/create-intent
@@ -56,6 +58,24 @@ exports.confirmPayment = async (req, res, next) => {
       order.status = 'confirmed';
       order.confirmedAt = Date.now();
       await order.save();
+
+      const customer = await User.findById(order.customer).select('name email role');
+      if (customer) {
+        await notifyUser({
+          user: customer,
+          type: 'ORDER',
+          title: 'Payment successful',
+          message: `Payment for order ${order.orderNumber} was successful.`,
+          linkUrl: `/orders/${order._id}/track`,
+          metadata: { event: 'order.payment-success', orderId: order._id.toString() },
+          emailTemplate: 'order_status',
+          emailContext: {
+            orderId: order.orderNumber,
+            status: 'confirmed',
+            actionLinks: [{ label: 'Track order', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/orders/${order._id}/track` }]
+          }
+        });
+      }
 
       // Create transactions for each vendor
       const vendorTransactions = {};
@@ -221,6 +241,28 @@ exports.requestRefund = async (req, res, next) => {
       order.refundAmount = amount || order.total;
       order.refundedAt = Date.now();
       await order.save();
+
+      const customer = await User.findById(order.customer).select('name email role');
+      if (customer) {
+        await notifyUser({
+          user: customer,
+          type: 'ORDER',
+          title: 'Refund processed',
+          message: `Refund for order ${order.orderNumber} has been processed.`,
+          linkUrl: `/orders/${order._id}/track`,
+          metadata: {
+            event: 'order.refund-processed',
+            orderId: order._id.toString(),
+            reason: reason || null
+          },
+          emailTemplate: 'order_status',
+          emailContext: {
+            orderId: order.orderNumber,
+            status: 'refunded',
+            actionLinks: [{ label: 'View order', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/orders/${order._id}/track` }]
+          }
+        });
+      }
 
       res.status(200).json({
         success: true,

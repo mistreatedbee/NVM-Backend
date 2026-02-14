@@ -3,7 +3,8 @@ const User = require('../models/User');
 const Product = require('../models/Product');
 const Order = require('../models/Order');
 const Review = require('../models/Review');
-const { sendEmail, vendorApprovalEmail } = require('../utils/email');
+const AuditLog = require('../models/AuditLog');
+const { notifyUser, notifyAdmins } = require('../services/notificationService');
 const cloudinary = require('../utils/cloudinary');
 
 function addActivityLog(vendor, { action, message, metadata, performedBy, performedByRole }) {
@@ -253,6 +254,34 @@ exports.createVendor = async (req, res, next) => {
       performedByRole: req.user.role
     });
     await vendor.save();
+
+    await notifyUser({
+      user: req.user,
+      type: 'APPROVAL',
+      title: 'Vendor registration submitted',
+      message: 'Your application is pending admin approval.',
+      linkUrl: '/vendor/approval-status',
+      metadata: { event: 'vendor.submitted', vendorId: vendor._id.toString() },
+      actor: {
+        actorId: req.user.id,
+        actorRole: req.user.role === 'vendor' ? 'Vendor' : 'Customer',
+        action: 'vendor.registration-submitted',
+        entityType: 'Vendor'
+      }
+    });
+
+    await notifyAdmins({
+      type: 'APPROVAL',
+      title: 'New vendor awaiting approval',
+      message: `${vendor.storeName} submitted registration and needs review.`,
+      linkUrl: `/admin/vendors`,
+      metadata: { event: 'vendor.awaiting-approval', vendorId: vendor._id.toString() },
+      emailTemplate: 'system_alert',
+      emailContext: {
+        status: 'vendor-approval-pending',
+        actionLinks: [{ label: 'Review vendor', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/admin/vendors` }]
+      }
+    });
 
     res.status(201).json({
       success: true,
@@ -634,6 +663,40 @@ exports.updateVendorStatus = async (req, res, next) => {
       performedByRole: req.user.role
     });
     await vendor.save();
+
+    await notifyUser({
+      user,
+      type: 'ACCOUNT',
+      title: 'Account status updated',
+      message: `Your vendor account status is now ${accountStatus}.`,
+      linkUrl: '/vendor/approval-status',
+      metadata: {
+        event: 'vendor.account-status-updated',
+        vendorId: vendor._id.toString(),
+        accountStatus,
+        reason: reason || null
+      },
+      emailTemplate: 'account_status',
+      emailContext: {
+        status: accountStatus,
+        actionLinks: [{ label: 'Open account status', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/vendor/approval-status` }]
+      },
+      actor: {
+        actorId: req.user.id,
+        actorRole: 'Admin',
+        action: 'vendor.status-updated',
+        entityType: 'Vendor'
+      }
+    });
+
+    await AuditLog.create({
+      actorId: req.user.id,
+      actorRole: 'Admin',
+      action: 'vendor.status.updated',
+      entityType: 'Vendor',
+      entityId: vendor._id,
+      metadata: { accountStatus, reason: reason || null, userId: user._id }
+    });
 
     res.status(200).json({
       success: true,
@@ -1305,15 +1368,34 @@ exports.approveVendor = async (req, res, next) => {
     });
     await vendor.save();
 
-    try {
-      await sendEmail({
-        email: vendor.email,
-        subject: 'Vendor Application Approved!',
-        html: vendorApprovalEmail(vendor.user.name, vendor.storeName)
-      });
-    } catch (error) {
-      console.error('Approval email failed:', error);
-    }
+    await notifyUser({
+      user,
+      type: 'APPROVAL',
+      title: 'Vendor application approved',
+      message: `${vendor.storeName} is approved and active.`,
+      linkUrl: '/vendor/dashboard',
+      metadata: { event: 'vendor.approved', vendorId: vendor._id.toString() },
+      emailTemplate: 'vendor_approved',
+      emailContext: {
+        vendorName: vendor.storeName,
+        actionLinks: [{ label: 'Go to dashboard', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/vendor/dashboard` }]
+      },
+      actor: {
+        actorId: req.user.id,
+        actorRole: 'Admin',
+        action: 'vendor.approved',
+        entityType: 'Vendor'
+      }
+    });
+
+    await AuditLog.create({
+      actorId: req.user.id,
+      actorRole: 'Admin',
+      action: 'vendor.approved',
+      entityType: 'Vendor',
+      entityId: vendor._id,
+      metadata: { userId: user._id }
+    });
 
     res.status(200).json({
       success: true,
@@ -1360,6 +1442,43 @@ exports.rejectVendor = async (req, res, next) => {
       performedByRole: req.user.role
     });
     await vendor.save();
+
+    if (user) {
+      await notifyUser({
+        user,
+        type: 'APPROVAL',
+        title: 'Vendor application rejected',
+        message: req.body.reason
+          ? `Reason: ${req.body.reason}`
+          : 'Your vendor registration was rejected.',
+        linkUrl: '/vendor/approval-status',
+        metadata: {
+          event: 'vendor.rejected',
+          vendorId: vendor._id.toString(),
+          reason: req.body.reason || null
+        },
+        emailTemplate: 'vendor_rejected',
+        emailContext: {
+          status: req.body.reason || 'rejected',
+          actionLinks: [{ label: 'Review status', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/vendor/approval-status` }]
+        },
+        actor: {
+          actorId: req.user.id,
+          actorRole: 'Admin',
+          action: 'vendor.rejected',
+          entityType: 'Vendor'
+        }
+      });
+    }
+
+    await AuditLog.create({
+      actorId: req.user.id,
+      actorRole: 'Admin',
+      action: 'vendor.rejected',
+      entityType: 'Vendor',
+      entityId: vendor._id,
+      metadata: { reason: req.body.reason || null, userId: vendor.user }
+    });
 
     res.status(200).json({
       success: true,

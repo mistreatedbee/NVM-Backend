@@ -1,5 +1,7 @@
 const User = require('../models/User');
 const Vendor = require('../models/Vendor');
+const AuditLog = require('../models/AuditLog');
+const { notifyUser } = require('../services/notificationService');
 
 // @desc    Get all users
 // @route   GET /api/users
@@ -54,6 +56,33 @@ exports.ban = async (req, res, next) => {
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
+
+    await notifyUser({
+      user,
+      type: 'ACCOUNT',
+      title: 'Account banned',
+      message: 'Your account has been banned by an administrator.',
+      linkUrl: '/login',
+      metadata: { event: 'account.banned' },
+      emailTemplate: 'account_status',
+      emailContext: { status: 'banned' },
+      actor: {
+        actorId: req.user.id,
+        actorRole: 'Admin',
+        action: 'user.banned',
+        entityType: 'User'
+      }
+    });
+
+    await AuditLog.create({
+      actorId: req.user.id,
+      actorRole: 'Admin',
+      action: 'user.banned',
+      entityType: 'User',
+      entityId: user._id,
+      metadata: { userId: user._id }
+    });
+
     res.status(200).json({ success: true, message: 'User banned successfully', data: user });
   } catch (error) {
     next(error);
@@ -73,6 +102,33 @@ exports.unban = async (req, res, next) => {
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
+
+    await notifyUser({
+      user,
+      type: 'ACCOUNT',
+      title: 'Account restored',
+      message: 'Your account access has been restored.',
+      linkUrl: '/login',
+      metadata: { event: 'account.unbanned' },
+      emailTemplate: 'account_status',
+      emailContext: { status: 'active' },
+      actor: {
+        actorId: req.user.id,
+        actorRole: 'Admin',
+        action: 'user.unbanned',
+        entityType: 'User'
+      }
+    });
+
+    await AuditLog.create({
+      actorId: req.user.id,
+      actorRole: 'Admin',
+      action: 'user.unbanned',
+      entityType: 'User',
+      entityId: user._id,
+      metadata: { userId: user._id }
+    });
+
     res.status(200).json({ success: true, message: 'User unbanned successfully', data: user });
   } catch (error) {
     next(error);
