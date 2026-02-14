@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const {
   createConversation,
+  getChatStarters,
   getConversations,
   getConversationById,
   postMessage,
@@ -16,6 +17,7 @@ const {
 const { authenticate } = require('../middleware/auth');
 
 router.post('/conversations', authenticate, createConversation);
+router.get('/starters', authenticate, getChatStarters);
 router.get('/conversations', authenticate, getConversations);
 router.get('/conversations/:id', authenticate, getConversationById);
 
