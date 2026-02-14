@@ -34,31 +34,46 @@ async function queueVerification(user, actorRole = 'System', templateId = 'verif
 
   const verificationUrl = buildAppUrl(`/verify-email?token=${rawToken}`);
 
-  await safeSendTemplateEmail({
-    to: user.email,
-    templateId,
-    context: {
-      userName: user.name,
-      actionLinks: [{ label: 'Verify Email', url: verificationUrl }]
-    },
-    metadata: {
-      event: 'email.verification.requested',
-      userId: user._id.toString()
-    }
-  });
+  try {
+    await safeSendTemplateEmail({
+      to: user.email,
+      templateId,
+      context: {
+        userName: user.name,
+        actionLinks: [{ label: 'Verify Email', url: verificationUrl }]
+      },
+      metadata: {
+        event: 'email.verification.requested',
+        userId: user._id.toString()
+      }
+    });
+  } catch (error) {
+    console.error('[auth] verification email dispatch failed', {
+      userId: user._id.toString(),
+      email: user.email,
+      error: error.message
+    });
+  }
 
-  await notifyUser({
-    user,
-    type: 'SECURITY',
-    title: 'Verify your email',
-    message: 'Please verify your email address to secure your account.',
-    linkUrl: '/verify-email',
-    metadata: { reason: 'registration' },
-    actor: {
-      actorRole,
-      action: 'security.email-verification-notification'
-    }
-  });
+  try {
+    await notifyUser({
+      user,
+      type: 'SECURITY',
+      title: 'Verify your email',
+      message: 'Please verify your email address to secure your account.',
+      linkUrl: '/verify-email',
+      metadata: { reason: 'registration' },
+      actor: {
+        actorRole,
+        action: 'security.email-verification-notification'
+      }
+    });
+  } catch (error) {
+    console.error('[auth] verification in-app notification failed', {
+      userId: user._id.toString(),
+      error: error.message
+    });
+  }
 }
 
 // @desc    Register user
@@ -184,6 +199,19 @@ exports.verifyEmail = async (req, res, next) => {
       }
     });
 
+    await safeSendTemplateEmail({
+      to: user.email,
+      templateId: 'welcome_email',
+      context: {
+        userName: user.name,
+        actionUrl: buildAppUrl('/marketplace')
+      },
+      metadata: {
+        event: 'email.welcome',
+        userId: user._id.toString()
+      }
+    });
+
     res.status(200).json({
       success: true,
       message: 'Email verified successfully',
@@ -263,18 +291,6 @@ exports.forgotPassword = async (req, res, next) => {
       }
     });
 
-    await safeSendTemplateEmail({
-      to: user.email,
-      templateId: 'welcome_email',
-      context: {
-        userName: user.name,
-        actionUrl: buildAppUrl('/marketplace')
-      },
-      metadata: {
-        event: 'email.welcome',
-        userId: user._id.toString()
-      }
-    });
     }
 
     res.status(200).json({
