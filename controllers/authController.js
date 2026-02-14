@@ -28,7 +28,7 @@ function safeAuthResponse(user, token, message = 'Success') {
   };
 }
 
-async function queueVerification(user, actorRole = 'System') {
+async function queueVerification(user, actorRole = 'System', templateId = 'verification') {
   const rawToken = user.getVerificationToken();
   await user.save();
 
@@ -36,7 +36,7 @@ async function queueVerification(user, actorRole = 'System') {
 
   await safeSendTemplateEmail({
     to: user.email,
-    templateId: 'verification',
+    templateId,
     context: {
       userName: user.name,
       actionLinks: [{ label: 'Verify Email', url: verificationUrl }]
@@ -210,7 +210,7 @@ exports.resendVerification = async (req, res, next) => {
 
     const user = await User.findOne({ email });
     if (user && !user.isVerified) {
-      await queueVerification(user, 'System');
+      await queueVerification(user, 'System', 'resend_verification');
     }
 
     res.status(200).json({
@@ -249,9 +249,9 @@ exports.forgotPassword = async (req, res, next) => {
         }
       });
 
-      await notifyUser({
-        user,
-        type: 'SECURITY',
+    await notifyUser({
+      user,
+      type: 'SECURITY',
         title: 'Password reset requested',
         message: 'If this was not you, secure your account immediately.',
         linkUrl: '/profile',
@@ -260,8 +260,21 @@ exports.forgotPassword = async (req, res, next) => {
           actorId: user._id,
           actorRole: user.role === 'vendor' ? 'Vendor' : user.role === 'admin' ? 'Admin' : 'Customer',
           action: 'security.password-reset-requested'
-        }
-      });
+      }
+    });
+
+    await safeSendTemplateEmail({
+      to: user.email,
+      templateId: 'welcome_email',
+      context: {
+        userName: user.name,
+        actionUrl: buildAppUrl('/marketplace')
+      },
+      metadata: {
+        event: 'email.welcome',
+        userId: user._id.toString()
+      }
+    });
     }
 
     res.status(200).json({
@@ -293,6 +306,19 @@ exports.resetPassword = async (req, res, next) => {
     user.resetPasswordToken = undefined;
     user.resetPasswordExpire = undefined;
     await user.save();
+
+    await safeSendTemplateEmail({
+      to: user.email,
+      templateId: 'password_changed',
+      context: {
+        userName: user.name,
+        actionUrl: buildAppUrl('/profile')
+      },
+      metadata: {
+        event: 'password.changed',
+        userId: user._id.toString()
+      }
+    });
 
     const token = generateToken(user._id);
     res.status(200).json(safeAuthResponse(user, token, 'Password reset successful'));

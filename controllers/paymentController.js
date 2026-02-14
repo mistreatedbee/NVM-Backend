@@ -255,10 +255,10 @@ exports.requestRefund = async (req, res, next) => {
             orderId: order._id.toString(),
             reason: reason || null
           },
-          emailTemplate: 'order_status',
+          emailTemplate: 'refund_processed',
           emailContext: {
             orderId: order.orderNumber,
-            status: 'refunded',
+            amount: amount ? String(amount) : undefined,
             actionLinks: [{ label: 'View order', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/orders/${order._id}/track` }]
           }
         });

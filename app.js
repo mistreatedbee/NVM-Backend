@@ -58,6 +58,7 @@ const bulkUploadRoutes = require('./routes/bulkUpload');
 const orderManagementRoutes = require('./routes/orderManagement');
 const invoiceRoutes = require('./routes/invoices');
 const analyticsRoutes = require('./routes/analytics');
+const emailRoutes = require('./routes/emails');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -77,6 +78,7 @@ app.use('/api/bulk-upload', bulkUploadRoutes);
 app.use('/api/order-management', orderManagementRoutes);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/emails', emailRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({

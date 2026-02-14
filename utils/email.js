@@ -23,14 +23,16 @@ async function sendEmail(options = {}) {
 function verificationEmail(userName, verificationUrl) {
   return renderTemplate('verification', {
     userName,
-    actionLinks: [{ label: 'Verify Email', url: verificationUrl }]
+    actionUrl: verificationUrl,
+    actionLabel: 'Verify Email'
   }).html;
 }
 
 function passwordResetEmail(userName, resetUrl) {
   return renderTemplate('password_reset', {
     userName,
-    actionLinks: [{ label: 'Reset Password', url: resetUrl }]
+    actionUrl: resetUrl,
+    actionLabel: 'Reset Password'
   }).html;
 }
 
@@ -38,7 +40,8 @@ function vendorApprovalEmail(vendorName, storeName) {
   return renderTemplate('vendor_approved', {
     userName: vendorName,
     vendorName: storeName,
-    actionLinks: [{ label: 'Open Vendor Dashboard', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/vendor/dashboard` }]
+    actionUrl: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/vendor/dashboard`,
+    actionLabel: 'Open Vendor Dashboard'
   }).html;
 }
 
@@ -46,7 +49,8 @@ function orderConfirmationEmail(customerName, orderNumber) {
   return renderTemplate('order_confirmation', {
     userName: customerName,
     orderId: orderNumber,
-    actionLinks: [{ label: 'Track Order', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/orders` }]
+    actionUrl: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/orders`,
+    actionLabel: 'Track Order'
   }).html;
 }
 

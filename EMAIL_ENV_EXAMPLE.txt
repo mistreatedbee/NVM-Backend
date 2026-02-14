@@ -1,0 +1,24 @@
+# Backend email environment template (do not commit real secrets)
+EMAIL_PROVIDER=SMTP
+SMTP_HOST=smtp-relay.brevo.com
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM_NAME=NVM Marketplace
+SMTP_FROM_EMAIL=
+APP_BASE_URL=http://localhost:5173
+SUPPORT_EMAIL=
+
+# Optional provider API keys
+# EMAIL_PROVIDER=SENDGRID
+SENDGRID_API_KEY=
+
+# EMAIL_PROVIDER=MAILGUN
+MAILGUN_API_KEY=
+MAILGUN_DOMAIN=
+
+# EMAIL_PROVIDER=RESEND
+RESEND_API_KEY=
+
+# Optional extra key used by other modules if needed
+API_MCP_KEY=

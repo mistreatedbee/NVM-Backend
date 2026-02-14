@@ -262,6 +262,11 @@ exports.createVendor = async (req, res, next) => {
       message: 'Your application is pending admin approval.',
       linkUrl: '/vendor/approval-status',
       metadata: { event: 'vendor.submitted', vendorId: vendor._id.toString() },
+      emailTemplate: 'vendor_registration_received',
+      emailContext: {
+        vendorName: vendor.storeName,
+        actionUrl: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/vendor/approval-status`
+      },
       actor: {
         actorId: req.user.id,
         actorRole: req.user.role === 'vendor' ? 'Vendor' : 'Customer',
@@ -664,6 +669,13 @@ exports.updateVendorStatus = async (req, res, next) => {
     });
     await vendor.save();
 
+    const accountTemplateByStatus = {
+      active: 'account_reinstated',
+      suspended: 'account_suspended',
+      banned: 'account_banned',
+      pending: 'account_status_update'
+    };
+
     await notifyUser({
       user,
       type: 'ACCOUNT',
@@ -676,9 +688,10 @@ exports.updateVendorStatus = async (req, res, next) => {
         accountStatus,
         reason: reason || null
       },
-      emailTemplate: 'account_status',
+      emailTemplate: accountTemplateByStatus[accountStatus] || 'account_status_update',
       emailContext: {
         status: accountStatus,
+        reason: reason || undefined,
         actionLinks: [{ label: 'Open account status', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/vendor/approval-status` }]
       },
       actor: {

@@ -64,8 +64,8 @@ exports.ban = async (req, res, next) => {
       message: 'Your account has been banned by an administrator.',
       linkUrl: '/login',
       metadata: { event: 'account.banned' },
-      emailTemplate: 'account_status',
-      emailContext: { status: 'banned' },
+      emailTemplate: 'account_banned',
+      emailContext: { status: 'banned', reason: req.body?.reason || 'Administrative action' },
       actor: {
         actorId: req.user.id,
         actorRole: 'Admin',
@@ -110,7 +110,7 @@ exports.unban = async (req, res, next) => {
       message: 'Your account access has been restored.',
       linkUrl: '/login',
       metadata: { event: 'account.unbanned' },
-      emailTemplate: 'account_status',
+      emailTemplate: 'account_reinstated',
       emailContext: { status: 'active' },
       actor: {
         actorId: req.user.id,
