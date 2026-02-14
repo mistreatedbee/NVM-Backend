@@ -10,6 +10,16 @@ const FAQ_RESPONSES = [
     response: 'For payouts: 1) Verify your bank details in Vendor Settings. 2) Check order payment status in Orders. 3) Paid/confirmed orders are added to payout cycles. 4) Contact support if a paid order is missing.'
   },
   {
+    intent: 'order_tracking',
+    patterns: ['track order', 'where is my order', 'delivery status', 'shipping status', 'order status'],
+    response: 'For order tracking: 1) Open your Orders page. 2) Select the order and view tracking updates. 3) If delayed or incorrect, start an order chat with the vendor for faster resolution.'
+  },
+  {
+    intent: 'product_issue',
+    patterns: ['damaged', 'wrong item', 'product issue', 'defective', 'not as described'],
+    response: 'For product issues: 1) Gather photos and order details. 2) Start an order-linked vendor chat. 3) If unresolved, request admin support for dispute handling.'
+  },
+  {
     intent: 'profile_setup',
     patterns: ['profile setup', 'store profile', 'update profile', 'vendor profile'],
     response: 'To complete profile setup: 1) Open Vendor Dashboard > Profile. 2) Add store name, category, contact, and policy details. 3) Upload logo/banner. 4) Save and review public preview.'

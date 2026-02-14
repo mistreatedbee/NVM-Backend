@@ -13,6 +13,8 @@ const { getIO } = require('../socket');
 const URGENT_KEYWORDS = ['payment issue', 'fraud', 'dispute', 'chargeback', 'scam'];
 const AUTO_ESCALATE_AFTER_ATTEMPTS = 3;
 const ALLOWED_ATTACHMENT_MIME = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+const HUMAN_SUPPORT_KEYWORDS = ['admin', 'human', 'agent', 'support', 'representative'];
+const ORDER_CONTEXT_KEYWORDS = ['order', 'delivery', 'tracking', 'refund', 'return', 'payment', 'vendor'];
 
 function sanitizeMessage(value) {
   if (!value) return '';
@@ -35,6 +37,62 @@ function isValidObjectId(id) {
 function containsUrgentKeyword(message) {
   const normalized = (message || '').toLowerCase();
   return URGENT_KEYWORDS.some(keyword => normalized.includes(keyword));
+}
+
+function wantsHumanSupport(message) {
+  const normalized = (message || '').toLowerCase();
+  return HUMAN_SUPPORT_KEYWORDS.some(keyword => normalized.includes(keyword));
+}
+
+function looksOrderRelated(message) {
+  const normalized = (message || '').toLowerCase();
+  return ORDER_CONTEXT_KEYWORDS.some(keyword => normalized.includes(keyword));
+}
+
+async function buildOrderSuggestionsForUser(user, max = 3) {
+  if (!user) return [];
+
+  if (user.role === 'customer') {
+    const orders = await Order.find({ customer: user.id })
+      .select('_id orderNumber status items createdAt')
+      .populate('items.vendor', 'storeName')
+      .sort({ createdAt: -1 })
+      .limit(max);
+
+    return orders.map(order => {
+      const firstVendor = order.items?.[0]?.vendor;
+      return {
+        orderId: order._id,
+        orderNumber: order.orderNumber,
+        orderStatus: order.status,
+        vendorId: firstVendor?._id || null,
+        vendorName: firstVendor?.storeName || null
+      };
+    });
+  }
+
+  if (user.role === 'vendor') {
+    const vendorProfile = await ensureVendorProfile(user.id);
+    if (!vendorProfile) return [];
+
+    const orders = await Order.find({ 'items.vendor': vendorProfile._id })
+      .select('_id orderNumber status customer createdAt')
+      .populate('customer', 'name')
+      .sort({ createdAt: -1 })
+      .limit(max);
+
+    return orders.map(order => ({
+      orderId: order._id,
+      orderNumber: order.orderNumber,
+      orderStatus: order.status,
+      customerId: order.customer?._id || null,
+      customerName: order.customer?.name || null,
+      vendorId: vendorProfile._id,
+      vendorName: vendorProfile.storeName || null
+    }));
+  }
+
+  return [];
 }
 
 async function writeAuditLog({ actorId, actorRole, action, entityType, entityId, metadata = {} }) {
@@ -119,7 +177,7 @@ async function createMessageAndBroadcast({ conversation, senderId, senderRole, m
 // POST /api/chat/conversations
 exports.createConversation = async (req, res, next) => {
   try {
-    const { type = 'general', vendorId, participantId, orderId } = req.body;
+    const { type = 'general', vendorId, participantId, orderId, forceNew = false } = req.body;
 
     if (!['general', 'order', 'support'].includes(type)) {
       return res.status(400).json({ success: false, message: 'Invalid conversation type' });
@@ -133,20 +191,29 @@ exports.createConversation = async (req, res, next) => {
     if (req.user.role === 'vendor') {
       vendorProfile = await ensureVendorProfile(req.user.id);
       vendorUserId = req.user.id;
-      customerId = participantId;
-      if (!participantId || !isValidObjectId(participantId)) {
-        return res.status(400).json({ success: false, message: 'Valid participantId is required' });
+
+      if (type !== 'support') {
+        customerId = participantId;
+        if (!participantId || !isValidObjectId(participantId)) {
+          return res.status(400).json({ success: false, message: 'Valid participantId is required' });
+        }
       }
     } else if (req.user.role === 'customer') {
       customerId = req.user.id;
-      if (!vendorId || !isValidObjectId(vendorId)) {
-        return res.status(400).json({ success: false, message: 'Valid vendorId is required' });
+
+      if (type !== 'support') {
+        if (!vendorId || !isValidObjectId(vendorId)) {
+          return res.status(400).json({ success: false, message: 'Valid vendorId is required' });
+        }
+        vendorProfile = await Vendor.findById(vendorId).select('_id user storeName');
+        if (!vendorProfile || !vendorProfile.user) {
+          return res.status(404).json({ success: false, message: 'Vendor not found' });
+        }
+        vendorUserId = vendorProfile.user.toString();
+      } else if (vendorId && isValidObjectId(vendorId)) {
+        vendorProfile = await Vendor.findById(vendorId).select('_id user storeName');
+        vendorUserId = vendorProfile?.user?.toString() || null;
       }
-      vendorProfile = await Vendor.findById(vendorId).select('_id user storeName');
-      if (!vendorProfile || !vendorProfile.user) {
-        return res.status(404).json({ success: false, message: 'Vendor not found' });
-      }
-      vendorUserId = vendorProfile.user.toString();
     } else if (req.user.role === 'admin') {
       if (!participantId || !isValidObjectId(participantId) || !vendorId || !isValidObjectId(vendorId)) {
         return res.status(400).json({ success: false, message: 'participantId and vendorId are required for admin-created conversations' });
@@ -191,34 +258,47 @@ exports.createConversation = async (req, res, next) => {
       vendorProfile = await Vendor.findById(vendorId).select('_id user storeName');
     }
 
-    if (!vendorProfile) {
+    if (type !== 'support' && !vendorProfile) {
       return res.status(404).json({ success: false, message: 'Vendor profile not found' });
     }
 
-    vendorUserId = vendorUserId || vendorProfile.user?.toString();
+    vendorUserId = vendorUserId || vendorProfile?.user?.toString();
 
-    if (!vendorUserId || !customerId) {
+    if (type !== 'support' && (!vendorUserId || !customerId)) {
       return res.status(400).json({ success: false, message: 'Unable to resolve participants' });
     }
 
-    const query = {
-      type,
-      vendorId: vendorProfile._id,
-      customerId,
-      vendorUserId,
-      ...(type === 'order' ? { orderId } : { orderId: null })
-    };
+    let conversation = null;
+    if (!forceNew) {
+      const query = type === 'support'
+        ? {
+          type,
+          createdBy: req.user.id,
+          ...(orderId ? { orderId } : { orderId: null })
+        }
+        : {
+          type,
+          vendorId: vendorProfile._id,
+          customerId,
+          vendorUserId,
+          ...(type === 'order' ? { orderId } : { orderId: null })
+        };
 
-    let conversation = await Conversation.findOne(query);
+      conversation = await Conversation.findOne(query);
+    }
 
     if (!conversation) {
+      const participants = type === 'support'
+        ? [req.user.id]
+        : [customerId, vendorUserId];
+
       conversation = await Conversation.create({
         type,
-        participantIds: [customerId, vendorUserId],
-        customerId,
-        vendorUserId,
-        vendorId: vendorProfile._id,
-        orderId: type === 'order' ? orderId : null,
+        participantIds: participants,
+        customerId: type === 'support' ? (req.user.role === 'customer' ? req.user.id : null) : customerId,
+        vendorUserId: type === 'support' ? (req.user.role === 'vendor' ? req.user.id : vendorUserId || null) : vendorUserId,
+        vendorId: vendorProfile?._id || null,
+        orderId: orderId || null,
         orderStatusSnapshot: order?.status || null,
         createdBy: req.user.id,
         supportStatus: 'Open'
@@ -292,6 +372,34 @@ exports.getConversations = async (req, res, next) => {
       currentPage: page,
       pages: Math.ceil(total / limit),
       data: conversations
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/chat/starters
+exports.getChatStarters = async (req, res, next) => {
+  try {
+    const orderSuggestions = await buildOrderSuggestionsForUser(req.user, 6);
+
+    const recentConversations = await Conversation.find(
+      req.user.role === 'admin'
+        ? {}
+        : { participantIds: req.user.id }
+    )
+      .select('_id type vendorId customerId vendorUserId orderId lastMessageAt')
+      .populate('vendorId', 'storeName')
+      .populate('customerId', 'name')
+      .sort({ lastMessageAt: -1, updatedAt: -1 })
+      .limit(10);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        orderSuggestions,
+        recentConversations
+      }
     });
   } catch (error) {
     next(error);
@@ -565,48 +673,60 @@ exports.escalateChat = async (req, res, next) => {
 // POST /api/chatbot/message
 exports.chatbotMessage = async (req, res, next) => {
   try {
-    if (req.user.role !== 'vendor') {
-      return res.status(403).json({ success: false, message: 'Only vendors can use vendor assistant chatbot' });
+    if (!['customer', 'vendor'].includes(req.user.role)) {
+      return res.status(403).json({ success: false, message: 'Only customers or vendors can use AI assistant chat' });
     }
 
-    const { conversationId, message } = req.body;
+    const { conversationId, message, orderId, vendorId } = req.body;
 
     if (!message || typeof message !== 'string') {
       return res.status(400).json({ success: false, message: 'Message is required' });
     }
 
-    const vendorProfile = await ensureVendorProfile(req.user.id);
-    if (!vendorProfile) {
-      return res.status(404).json({ success: false, message: 'Vendor profile not found' });
-    }
-
     let conversation = null;
     if (conversationId && isValidObjectId(conversationId)) {
       conversation = await Conversation.findById(conversationId);
+      if (conversation) {
+        const allowed = await canAccessConversation(conversation, req.user);
+        if (!allowed) {
+          return res.status(403).json({ success: false, message: 'Not authorized for this conversation' });
+        }
+      }
     }
 
     if (!conversation) {
+      let vendorProfile = null;
+      if (req.user.role === 'vendor') {
+        vendorProfile = await ensureVendorProfile(req.user.id);
+      } else if (vendorId && isValidObjectId(vendorId)) {
+        vendorProfile = await Vendor.findById(vendorId).select('_id user storeName');
+      }
+
       conversation = await Conversation.create({
         type: 'support',
         participantIds: [req.user.id],
-        vendorUserId: req.user.id,
-        vendorId: vendorProfile._id,
+        customerId: req.user.role === 'customer' ? req.user.id : null,
+        vendorUserId: req.user.role === 'vendor' ? req.user.id : vendorProfile?.user || null,
+        vendorId: vendorProfile?._id || null,
+        orderId: orderId && isValidObjectId(orderId) ? orderId : null,
         createdBy: req.user.id,
         supportStatus: 'Open'
       });
     }
 
     const cleanedIncoming = sanitizeMessage(message);
+    const senderRole = getSenderRoleFromUser(req.user);
 
-    const vendorMessage = await createMessageAndBroadcast({
+    const userMessage = await createMessageAndBroadcast({
       conversation,
       senderId: req.user.id,
-      senderRole: 'Vendor',
+      senderRole,
       messageContent: cleanedIncoming,
       messageType: 'text'
     });
 
     const assistant = botReply(cleanedIncoming);
+    const orderSuggestions = await buildOrderSuggestionsForUser(req.user, 3);
 
     if (assistant.resolved) {
       conversation.botContext = {
@@ -625,32 +745,48 @@ exports.chatbotMessage = async (req, res, next) => {
 
     await conversation.save();
 
+    let enhancedResponse = assistant.response;
+
+    if (looksOrderRelated(cleanedIncoming) && orderSuggestions.length) {
+      const first = orderSuggestions[0];
+      if (req.user.role === 'customer') {
+        enhancedResponse += ` I found your recent order ${first.orderNumber} (${first.orderStatus}). Would you like to message ${first.vendorName || 'the vendor'} directly?`;
+      } else {
+        enhancedResponse += ` I found your recent order ${first.orderNumber} (${first.orderStatus}). Would you like to message the customer directly from order chat?`;
+      }
+    }
+
     const botMessage = await createMessageAndBroadcast({
       conversation,
       senderId: null,
       senderRole: 'Bot',
-      messageContent: assistant.response,
+      messageContent: enhancedResponse,
       messageType: 'text'
     });
 
     let escalatedTicket = null;
-    if (!assistant.resolved && conversation.botContext.unresolvedAttempts >= AUTO_ESCALATE_AFTER_ATTEMPTS) {
+    if (
+      wantsHumanSupport(cleanedIncoming) ||
+      (!assistant.resolved && conversation.botContext.unresolvedAttempts >= AUTO_ESCALATE_AFTER_ATTEMPTS)
+    ) {
       escalatedTicket = await escalateConversation({
         conversation,
         requestedBy: req.user,
-        reason: 'Auto escalation: assistant could not resolve issue',
+        reason: wantsHumanSupport(cleanedIncoming)
+          ? 'User requested admin support'
+          : 'Auto escalation: assistant could not resolve issue',
         unresolvedAttempts: conversation.botContext.unresolvedAttempts
       });
     }
 
     await writeAuditLog({
       actorId: req.user.id,
-      actorRole: 'Vendor',
+      actorRole: senderRole,
       action: 'chatbot.interaction',
       entityType: 'Conversation',
       entityId: conversation._id,
       metadata: {
-        messageId: vendorMessage._id,
+        messageId: userMessage._id,
         botMessageId: botMessage._id,
         resolved: assistant.resolved,
         attempts: conversation.botContext.unresolvedAttempts
@@ -661,8 +797,9 @@ exports.chatbotMessage = async (req, res, next) => {
       success: true,
       data: {
         conversation,
-        vendorMessage,
+        userMessage,
         botMessage,
+        suggestions: orderSuggestions,
         escalated: Boolean(escalatedTicket),
         ticket: escalatedTicket
       }
@@ -680,7 +817,7 @@ exports.getAdminEscalatedChats = async (req, res, next) => {
     }
 
     const status = req.query.status;
-    const query = { isEscalated: true };
+    const query = { $or: [{ isEscalated: true }, { type: 'support' }] };
 
     if (status && ['Open', 'In Progress', 'Resolved'].includes(status)) {
       query.supportStatus = status;
