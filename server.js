@@ -1,7 +1,11 @@
 const dotenv = require('dotenv');
 const mongoose = require('mongoose');
+const http = require('http');
+const { Server } = require('socket.io');
 const app = require('./app');
 const { ensureDefaultCategories } = require('./utils/seedDefaultCategories');
+const { initSocket } = require('./socket');
+const registerChatHandler = require('./socket/chatHandler');
 
 dotenv.config();
 
@@ -12,7 +16,19 @@ mongoose.connect(process.env.MONGO_URI)
     console.log('MongoDB Connected');
     await ensureDefaultCategories();
 
-    app.listen(PORT, () => {
+    const httpServer = http.createServer(app);
+
+    const io = new Server(httpServer, {
+      cors: {
+        origin: ['http://localhost:5173', 'http://localhost:3000', process.env.FRONTEND_URL].filter(Boolean),
+        credentials: true
+      }
+    });
+
+    initSocket(io);
+    registerChatHandler(io);
+
+    httpServer.listen(PORT, () => {
       console.log(`VM Marketplace Server running on port ${PORT}`);
       console.log(`API available at http://localhost:${PORT}/api`);
     });

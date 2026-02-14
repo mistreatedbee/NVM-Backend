@@ -1,67 +1,122 @@
-const Chat = require('../models/Chat');
+const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+const Conversation = require('../models/Conversation');
+const Message = require('../models/Message');
+
+function getTokenFromHandshake(socket) {
+  const authHeader = socket.handshake.auth?.token || socket.handshake.headers?.authorization;
+  if (!authHeader) return null;
+
+  if (authHeader.startsWith('Bearer ')) {
+    return authHeader.slice(7);
+  }
+
+  return authHeader;
+}
+
+async function resolveSocketUser(socket) {
+  const token = getTokenFromHandshake(socket);
+  if (!token) {
+    throw new Error('Authentication token missing');
+  }
+
+  const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key-change-in-production');
+  const user = await User.findById(decoded.id).select('_id role name');
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  return user;
+}
+
+async function canAccessConversation(conversation, user) {
+  if (user.role === 'admin') return true;
+  return conversation.participantIds.some(id => id.toString() === user._id.toString());
+}
 
 module.exports = (io) => {
+  io.use(async (socket, next) => {
+    try {
+      const user = await resolveSocketUser(socket);
+      socket.user = user;
+      socket.join(`user:${user._id.toString()}`);
+      return next();
+    } catch (error) {
+      return next(new Error('Unauthorized socket connection'));
+    }
+  });
+
   io.on('connection', (socket) => {
-    console.log('New client connected:', socket.id);
-
-    // Join a chat room
-    socket.on('join-chat', async ({ userId, vendorId }) => {
-      const roomId = [userId, vendorId].sort().join('-');
-      socket.join(roomId);
-      console.log(`User ${userId} joined chat with vendor ${vendorId}`);
-    });
-
-    // Send message
-    socket.on('send-message', async ({ chatId, senderId, message }) => {
+    socket.on('chat:join-conversation', async ({ conversationId }) => {
       try {
-        const chat = await Chat.findById(chatId);
-        
-        if (!chat) {
-          return socket.emit('error', { message: 'Chat not found' });
+        const conversation = await Conversation.findById(conversationId);
+        if (!conversation) {
+          return socket.emit('chat:error', { message: 'Conversation not found' });
         }
 
-        chat.messages.push({
-          sender: senderId,
-          message,
-          timestamp: new Date()
-        });
+        const allowed = await canAccessConversation(conversation, socket.user);
+        if (!allowed) {
+          return socket.emit('chat:error', { message: 'Not authorized' });
+        }
 
-        chat.lastMessage = message;
-        chat.lastMessageAt = new Date();
-        
-        await chat.save();
-
-        // Emit to all participants
-        chat.participants.forEach(participantId => {
-          io.to(participantId.toString()).emit('new-message', {
-            chatId,
-            senderId,
-            message,
-            timestamp: new Date()
-          });
-        });
+        socket.join(`conversation:${conversationId}`);
+        socket.emit('chat:joined', { conversationId });
       } catch (error) {
-        socket.emit('error', { message: error.message });
+        socket.emit('chat:error', { message: error.message || 'Join failed' });
       }
     });
 
-    // Mark messages as read
-    socket.on('mark-read', async ({ chatId, userId }) => {
+    socket.on('chat:leave-conversation', ({ conversationId }) => {
+      socket.leave(`conversation:${conversationId}`);
+    });
+
+    socket.on('chat:typing', async ({ conversationId, typing }) => {
       try {
-        await Chat.updateMany(
-          { _id: chatId, 'messages.sender': { $ne: userId } },
-          { $set: { 'messages.$[].read': true } }
-        );
-        
-        socket.emit('marked-read', { chatId });
+        const conversation = await Conversation.findById(conversationId);
+        if (!conversation) return;
+
+        const allowed = await canAccessConversation(conversation, socket.user);
+        if (!allowed) return;
+
+        socket.to(`conversation:${conversationId}`).emit('chat:typing', {
+          conversationId,
+          userId: socket.user._id,
+          typing: Boolean(typing)
+        });
       } catch (error) {
-        socket.emit('error', { message: error.message });
+        socket.emit('chat:error', { message: 'Typing signal failed' });
       }
     });
 
-    socket.on('disconnect', () => {
-      console.log('Client disconnected:', socket.id);
+    socket.on('chat:mark-read', async ({ conversationId }) => {
+      try {
+        const conversation = await Conversation.findById(conversationId);
+        if (!conversation) return;
+
+        const allowed = await canAccessConversation(conversation, socket.user);
+        if (!allowed) return;
+
+        const now = new Date();
+
+        await Message.updateMany(
+          {
+            conversationId,
+            senderId: { $ne: socket.user._id },
+            readAt: null
+          },
+          {
+            $set: { readAt: now }
+          }
+        );
+
+        io.to(`conversation:${conversationId}`).emit('chat:conversation-read', {
+          conversationId,
+          readAt: now,
+          readerId: socket.user._id
+        });
+      } catch (error) {
+        socket.emit('chat:error', { message: 'Read update failed' });
+      }
     });
   });
 };
-
