@@ -3,6 +3,9 @@ const Product = require('../models/Product');
 const Vendor = require('../models/Vendor');
 const Transaction = require('../models/Transaction');
 const Notification = require('../models/Notification');
+const Conversation = require('../models/Conversation');
+const Message = require('../models/Message');
+const AuditLog = require('../models/AuditLog');
 const { sendEmail, orderConfirmationEmail } = require('../utils/email');
 
 // @desc    Create new order
@@ -124,6 +127,57 @@ exports.createOrder = async (req, res, next) => {
           vendorId
         }
       });
+    }
+
+    // Auto-create order conversations (one thread per vendor in the order)
+    for (const vendorId of vendors) {
+      const vendor = await Vendor.findById(vendorId).select('_id user');
+      if (!vendor?.user) continue;
+
+      let conversation = await Conversation.findOne({
+        type: 'order',
+        orderId: order._id,
+        vendorId: vendor._id,
+        customerId: req.user.id
+      });
+
+      if (!conversation) {
+        conversation = await Conversation.create({
+          type: 'order',
+          participantIds: [req.user.id, vendor.user],
+          customerId: req.user.id,
+          vendorUserId: vendor.user,
+          vendorId: vendor._id,
+          orderId: order._id,
+          orderStatusSnapshot: order.status,
+          createdBy: req.user.id,
+          supportStatus: 'Open',
+          lastMessage: `Order ${order.orderNumber} conversation started.`,
+          lastMessageAt: new Date()
+        });
+
+        const systemMessage = await Message.create({
+          conversationId: conversation._id,
+          senderId: null,
+          senderRole: 'System',
+          messageContent: `Order ${order.orderNumber} conversation started. Current status: ${order.status}.`,
+          messageType: 'system'
+        });
+
+        await AuditLog.create({
+          actorId: req.user.id,
+          actorRole: 'Customer',
+          action: 'conversation.created',
+          entityType: 'Conversation',
+          entityId: conversation._id,
+          metadata: {
+            trigger: 'order.created',
+            messageId: systemMessage._id,
+            orderId: order._id,
+            vendorId: vendor._id
+          }
+        });
+      }
     }
 
     res.status(201).json({
