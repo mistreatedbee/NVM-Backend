@@ -50,6 +50,7 @@ const paymentRoutes = require('./routes/payments');
 const categoryRoutes = require('./routes/categories');
 const reviewRoutes = require('./routes/reviews');
 const chatRoutes = require('./routes/chats');
+const adminChatRoutes = require('./routes/adminChats');
 const notificationRoutes = require('./routes/notifications');
 const searchRoutes = require('./routes/search');
 const subscriptionRoutes = require('./routes/subscriptions');
@@ -57,6 +58,8 @@ const bulkUploadRoutes = require('./routes/bulkUpload');
 const orderManagementRoutes = require('./routes/orderManagement');
 const invoiceRoutes = require('./routes/invoices');
 const analyticsRoutes = require('./routes/analytics');
+const emailRoutes = require('./routes/emails');
+const debugRoutes = require('./routes/debug');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -67,6 +70,8 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/chats', chatRoutes);
+app.use('/api/chat', chatRoutes);
+app.use('/api/admin/chats', adminChatRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
@@ -74,6 +79,8 @@ app.use('/api/bulk-upload', bulkUploadRoutes);
 app.use('/api/order-management', orderManagementRoutes);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/emails', emailRoutes);
+app.use('/debug', debugRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({

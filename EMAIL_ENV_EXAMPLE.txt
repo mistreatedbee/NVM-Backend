@@ -1,0 +1,18 @@
+# Backend email environment template (do not commit real secrets)
+EMAIL_PROVIDER=BREVO_API
+BREVO_API_KEY=
+
+# Optional SMTP fallback
+SMTP_HOST=smtp-relay.brevo.com
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM_NAME=NextWave Digital
+SMTP_FROM_EMAIL=your_verified_sender@domain.com
+APP_BASE_URL=https://nvm-frontend.vercel.app
+SUPPORT_EMAIL=
+EMAIL_DEBUG_ENABLED=false
+EMAIL_DEBUG_TOKEN=
+
+# Optional extra key used by other modules if needed
+API_MCP_KEY=

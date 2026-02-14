@@ -35,6 +35,13 @@ exports.authenticate = async (req, res, next) => {
       });
     }
 
+    if (req.user.isBanned) {
+      return res.status(403).json({
+        success: false,
+        message: 'Account is restricted'
+      });
+    }
+
     next();
   } catch (error) {
     if (error.name === 'JsonWebTokenError') {
@@ -87,5 +94,16 @@ exports.isCustomer = (req, res, next) => {
       message: 'Access denied. Please log in.'
     });
   }
+};
+
+exports.requireVerifiedEmail = (req, res, next) => {
+  if (req.user?.isVerified) {
+    return next();
+  }
+
+  return res.status(403).json({
+    success: false,
+    message: 'Verify your email before performing this action'
+  });
 };
 
