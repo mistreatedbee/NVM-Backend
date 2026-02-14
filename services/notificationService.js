@@ -1,8 +1,7 @@
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 const AuditLog = require('../models/AuditLog');
-const { renderTemplate } = require('./emailTemplates');
-const { sendEmail } = require('./mailService');
+const { sendTemplate } = require('./emailService');
 const { getIO } = require('../socket');
 
 function toAuditRole(role) {
@@ -63,15 +62,7 @@ async function safeSendTemplateEmail({ to, templateId, context, metadata }) {
   if (!to) return { skipped: true, reason: 'missing-email' };
 
   try {
-    const rendered = renderTemplate(templateId, context);
-    return await sendEmail({
-      to,
-      subject: rendered.subject,
-      html: rendered.html,
-      text: rendered.text,
-      templateId,
-      metadata
-    });
+    return await sendTemplate(templateId, to, context, metadata);
   } catch (error) {
     console.error('[notification] email send failed', {
       to,
