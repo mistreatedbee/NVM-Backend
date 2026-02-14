@@ -2,11 +2,11 @@ const Order = require('../models/Order');
 const Product = require('../models/Product');
 const Vendor = require('../models/Vendor');
 const Transaction = require('../models/Transaction');
-const Notification = require('../models/Notification');
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const AuditLog = require('../models/AuditLog');
-const { sendEmail, orderConfirmationEmail } = require('../utils/email');
+const User = require('../models/User');
+const { notifyUser } = require('../services/notificationService');
 
 // @desc    Create new order
 // @route   POST /api/orders
@@ -96,16 +96,29 @@ exports.createOrder = async (req, res, next) => {
       }
     }
 
-    // Send order confirmation email
-    try {
-      await sendEmail({
-        email: req.user.email,
-        subject: 'Order Confirmation - NVM',
-        html: orderConfirmationEmail(req.user.name, order.orderNumber, order.total)
-      });
-    } catch (error) {
-      console.error('Order confirmation email failed:', error);
-    }
+    await notifyUser({
+      user: req.user,
+      type: 'ORDER',
+      title: 'Order placed successfully',
+      message: `Your order ${order.orderNumber} has been placed.`,
+      linkUrl: `/orders/${order._id}/track`,
+      metadata: {
+        event: 'order.placed',
+        orderId: order._id.toString(),
+        orderNumber: order.orderNumber
+      },
+      emailTemplate: 'order_confirmation',
+      emailContext: {
+        orderId: order.orderNumber,
+        actionLinks: [{ label: 'Track order', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/orders/${order._id}/track` }]
+      },
+      actor: {
+        actorId: req.user.id,
+        actorRole: 'Customer',
+        action: 'order.customer-notified',
+        entityType: 'Order'
+      }
+    });
 
     // Create notifications for vendors
     const vendors = [...new Set(orderItems.map(item => item.vendor.toString()))];
@@ -115,19 +128,58 @@ exports.createOrder = async (req, res, next) => {
       const vendor = await Vendor.findById(vendorId).select('user');
       if (!vendor?.user) continue;
 
-      await Notification.create({
-        user: vendor.user,
-        type: 'order',
-        title: 'New Order Received',
-        message: `You have received a new order ${order.orderNumber}`,
-        link: `/vendor/orders/${order._id}`,
-        data: {
-          orderId: order._id,
+      const vendorUser = await User.findById(vendor.user).select('name email role');
+      if (!vendorUser) continue;
+
+      await notifyUser({
+        user: vendorUser,
+        type: 'ORDER',
+        title: 'New order received',
+        message: `You received order ${order.orderNumber}.`,
+        linkUrl: `/vendor/orders/${order._id}`,
+        metadata: {
+          event: 'order.new-for-vendor',
+          orderId: order._id.toString(),
           orderNumber: order.orderNumber,
           vendorId
+        },
+        emailTemplate: 'new_order_vendor',
+        emailContext: {
+          orderId: order.orderNumber,
+          actionLinks: [{ label: 'Open order', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/vendor/orders/${order._id}` }]
+        },
+        actor: {
+          actorId: req.user.id,
+          actorRole: 'Customer',
+          action: 'order.vendor-notified',
+          entityType: 'Order'
         }
       });
     }
+
+    await notifyUser({
+      user: req.user,
+      type: 'ORDER',
+      title: 'Invoice available',
+      message: `Invoice for order ${order.orderNumber} is ready.`,
+      linkUrl: `/orders/${order._id}/invoice`,
+      metadata: {
+        event: 'invoice.ready',
+        orderId: order._id.toString(),
+        orderNumber: order.orderNumber
+      },
+      emailTemplate: 'invoice_ready',
+      emailContext: {
+        orderId: order.orderNumber,
+        actionLinks: [{ label: 'View invoice', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/orders/${order._id}/invoice` }]
+      },
+      actor: {
+        actorId: req.user.id,
+        actorRole: 'Customer',
+        action: 'invoice.customer-notified',
+        entityType: 'Order'
+      }
+    });
 
     // Auto-create order conversations (one thread per vendor in the order)
     for (const vendorId of vendors) {
@@ -375,16 +427,45 @@ exports.updateOrderStatus = async (req, res, next) => {
 
     await order.save();
 
-    // Create notification for customer
-    await Notification.create({
-      recipient: order.customer,
-      type: `order-${status}`,
-      title: `Order ${status}`,
-      message: `Your order ${order.orderNumber} has been ${status}`,
-      link: `/customer/orders/${order._id}`,
-      order: order._id
-    });
+    const customer = await User.findById(order.customer).select('name email role');
+    if (customer) {
+      await notifyUser({
+        user: customer,
+        type: 'ORDER',
+        title: `Order status: ${status}`,
+        message: `Your order ${order.orderNumber} is now ${status}.`,
+        linkUrl: `/orders/${order._id}/track`,
+        metadata: {
+          event: 'order.status.updated',
+          orderId: order._id.toString(),
+          orderNumber: order.orderNumber,
+          status
+        },
+        emailTemplate: 'order_status',
+        emailContext: {
+          orderId: order.orderNumber,
+          status,
+          actionLinks: [{ label: 'Track order', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/orders/${order._id}/track` }]
+        },
+        actor: {
+          actorId: req.user.id,
+          actorRole: req.user.role === 'admin' ? 'Admin' : 'Vendor',
+          action: 'order.status-notified',
+          entityType: 'Order'
+        }
+      });
+    }
 
+    if (status === 'cancelled' && customer) {
+      await notifyUser({
+        user: customer,
+        type: 'ACCOUNT',
+        title: 'Order cancelled',
+        message: `Order ${order.orderNumber} has been cancelled.`,
+        linkUrl: `/orders/${order._id}/track`,
+        metadata: { event: 'order.cancelled', orderId: order._id.toString() }
+      });
+    }
     res.status(200).json({
       success: true,
       data: order
