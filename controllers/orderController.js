@@ -5,6 +5,7 @@ const Transaction = require('../models/Transaction');
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const AuditLog = require('../models/AuditLog');
+const OrderStatusHistory = require('../models/OrderStatusHistory');
 const User = require('../models/User');
 const { notifyUser } = require('../services/notificationService');
 const { buildAppUrl } = require('../utils/appUrl');
@@ -60,13 +61,21 @@ exports.createOrder = async (req, res, next) => {
 
       orderItems.push({
         product: product._id,
+        productId: product._id,
         vendor: product.vendor,
+        vendorId: product.vendor,
         name: product.name,
+        titleSnapshot: product.name,
         image: product.images[0]?.url,
         price: product.price,
+        priceSnapshot: product.price,
         quantity: item.quantity,
+        qty: item.quantity,
         variant: item.variant,
-        subtotal: itemSubtotal
+        subtotal: itemSubtotal,
+        lineTotal: itemSubtotal,
+        status: 'PENDING',
+        updatedAt: new Date()
       });
     }
 
@@ -76,15 +85,37 @@ exports.createOrder = async (req, res, next) => {
     // Create order
     const order = await Order.create({
       customer: req.user.id,
+      customerId: req.user.id,
       items: orderItems,
       subtotal,
       shippingCost,
+      deliveryFee: shippingCost,
       tax,
       total,
       shippingAddress,
+      deliveryAddress: shippingAddress,
       billingAddress: billingAddress || shippingAddress,
       paymentMethod,
+      paymentStatus: 'PENDING',
+      orderStatus: 'PENDING',
+      deliveryMethod: 'DELIVERY',
+      totals: {
+        subtotal,
+        delivery: shippingCost,
+        discount: 0,
+        total
+      },
       customerNotes
+    });
+
+    await OrderStatusHistory.create({
+      orderId: order._id,
+      actorId: req.user.id,
+      actorRole: 'CUSTOMER',
+      level: 'ORDER',
+      fromStatus: null,
+      toStatus: 'PENDING',
+      note: 'Order placed'
     });
 
     // Update product stock

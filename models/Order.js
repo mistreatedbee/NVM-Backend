@@ -1,4 +1,10 @@
 const mongoose = require('mongoose');
+const {
+  normalizeItemStatus,
+  computeOverallOrderStatus,
+  mapOrderStatusToLegacy,
+  normalizePaymentStatus
+} = require('../utils/orderWorkflow');
 
 function generateOrderNumber() {
   const date = new Date();
@@ -17,20 +23,34 @@ const orderItemSchema = new mongoose.Schema({
     ref: 'Product',
     required: true
   },
+  productId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Product'
+  },
   vendor: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Vendor',
     required: true
   },
+  vendorId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Vendor'
+  },
   name: String,
+  titleSnapshot: String,
   image: String,
   price: {
     type: Number,
     required: true
   },
+  priceSnapshot: Number,
   quantity: {
     type: Number,
     required: true,
+    min: 1
+  },
+  qty: {
+    type: Number,
     min: 1
   },
   variant: {
@@ -44,13 +64,27 @@ const orderItemSchema = new mongoose.Schema({
     type: Number,
     required: true
   },
+  lineTotal: {
+    type: Number
+  },
   // Vendor-specific status
   status: {
     type: String,
-    enum: ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded'],
-    default: 'pending'
+    enum: [
+      'pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded',
+      'PENDING', 'ACCEPTED', 'PACKING', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'REFUNDED'
+    ],
+    default: 'PENDING'
   },
-  vendorNotes: String
+  tracking: {
+    carrier: String,
+    trackingNumber: String,
+    trackingUrl: String,
+    lastUpdatedAt: Date
+  },
+  vendorNotes: String,
+  fulfilmentNotes: String,
+  updatedAt: Date
 });
 
 const orderSchema = new mongoose.Schema({
@@ -64,6 +98,10 @@ const orderSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
+  },
+  customerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
   },
   
   // Order Items
@@ -120,8 +158,8 @@ const orderSchema = new mongoose.Schema({
   },
   paymentStatus: {
     type: String,
-    enum: ['pending', 'paid', 'failed', 'refunded', 'awaiting-confirmation'],
-    default: 'pending'
+    enum: ['pending', 'paid', 'failed', 'refunded', 'awaiting-confirmation', 'PENDING', 'PAID', 'FAILED', 'REFUNDED', 'AWAITING-CONFIRMATION'],
+    default: 'PENDING'
   },
   paymentId: String,
   paidAt: Date,
@@ -142,8 +180,13 @@ const orderSchema = new mongoose.Schema({
   // Overall Order Status
   status: {
     type: String,
-    enum: ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded'],
+    enum: ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded', 'PENDING', 'PROCESSING', 'PARTIALLY_SHIPPED', 'SHIPPED', 'PARTIALLY_DELIVERED', 'DELIVERED', 'CANCELLED', 'REFUNDED'],
     default: 'pending'
+  },
+  orderStatus: {
+    type: String,
+    enum: ['PENDING', 'PROCESSING', 'PARTIALLY_SHIPPED', 'SHIPPED', 'PARTIALLY_DELIVERED', 'DELIVERED', 'CANCELLED', 'REFUNDED'],
+    default: 'PENDING'
   },
   
   // Fulfillment Method
@@ -153,11 +196,35 @@ const orderSchema = new mongoose.Schema({
     required: true,
     default: 'delivery'
   },
+  deliveryMethod: {
+    type: String,
+    enum: ['DELIVERY', 'PICKUP'],
+    default: 'DELIVERY'
+  },
   collectionPoint: {
     name: String,
     address: String,
     phone: String,
     instructions: String
+  },
+  deliveryAddress: {
+    fullName: String,
+    phone: String,
+    street: String,
+    city: String,
+    state: String,
+    country: String,
+    zipCode: String
+  },
+  deliveryFee: {
+    type: Number,
+    default: 0
+  },
+  totals: {
+    subtotal: { type: Number, default: 0 },
+    delivery: { type: Number, default: 0 },
+    discount: { type: Number, default: 0 },
+    total: { type: Number, default: 0 }
   },
   
   // Tracking
@@ -217,17 +284,92 @@ const orderSchema = new mongoose.Schema({
 });
 
 // Indexes
-orderSchema.index({ customer: 1 });
-orderSchema.index({ 'items.vendor': 1 });
-orderSchema.index({ status: 1 });
-orderSchema.index({ paymentStatus: 1 });
-orderSchema.index({ createdAt: -1 });
+orderSchema.index({ customerId: 1, createdAt: -1 });
+orderSchema.index({ 'items.vendorId': 1, createdAt: -1 });
+orderSchema.index({ orderStatus: 1, createdAt: -1 });
+orderSchema.index({ paymentStatus: 1, createdAt: -1 });
+orderSchema.index({ customer: 1, createdAt: -1 });
+orderSchema.index({ 'items.vendor': 1, createdAt: -1 });
+orderSchema.index({ status: 1, createdAt: -1 });
 
 // Ensure order number exists before validation runs (required validator happens before save)
 orderSchema.pre('validate', function(next) {
   if (!this.orderNumber) {
     this.orderNumber = generateOrderNumber();
   }
+
+  if (!this.customerId && this.customer) {
+    this.customerId = this.customer;
+  }
+  if (!this.customer && this.customerId) {
+    this.customer = this.customerId;
+  }
+
+  for (const item of this.items || []) {
+    if (!item.productId && item.product) item.productId = item.product;
+    if (!item.product && item.productId) item.product = item.productId;
+    if (!item.vendorId && item.vendor) item.vendorId = item.vendor;
+    if (!item.vendor && item.vendorId) item.vendor = item.vendorId;
+    if (!item.titleSnapshot && item.name) item.titleSnapshot = item.name;
+    if (!item.name && item.titleSnapshot) item.name = item.titleSnapshot;
+    if (item.priceSnapshot === undefined || item.priceSnapshot === null) item.priceSnapshot = item.price;
+    if (item.price === undefined || item.price === null) item.price = item.priceSnapshot;
+    if (!item.qty) item.qty = item.quantity;
+    if (!item.quantity) item.quantity = item.qty;
+    if (item.lineTotal === undefined || item.lineTotal === null) item.lineTotal = item.subtotal;
+    if (item.subtotal === undefined || item.subtotal === null) item.subtotal = item.lineTotal;
+    item.status = normalizeItemStatus(item.status);
+    item.updatedAt = new Date();
+  }
+
+  if (this.items?.length) {
+    if (this.isModified('orderStatus')) {
+      this.orderStatus = this.orderStatus;
+    } else {
+      this.orderStatus = computeOverallOrderStatus(this.items);
+    }
+    this.status = mapOrderStatusToLegacy(this.orderStatus);
+  } else if (!this.orderStatus) {
+    this.orderStatus = 'PENDING';
+  }
+
+  this.paymentStatus = normalizePaymentStatus(this.paymentStatus);
+
+  if (!this.deliveryMethod) {
+    this.deliveryMethod = this.fulfillmentMethod === 'collection' ? 'PICKUP' : 'DELIVERY';
+  }
+  if (!this.fulfillmentMethod) {
+    this.fulfillmentMethod = this.deliveryMethod === 'PICKUP' ? 'collection' : 'delivery';
+  }
+
+  if (!this.deliveryAddress && this.shippingAddress) {
+    this.deliveryAddress = this.shippingAddress;
+  }
+  if (!this.shippingAddress && this.deliveryAddress) {
+    this.shippingAddress = this.deliveryAddress;
+  }
+
+  if (!this.deliveryFee && this.shippingCost) {
+    this.deliveryFee = this.shippingCost;
+  }
+  if (!this.shippingCost && this.deliveryFee) {
+    this.shippingCost = this.deliveryFee;
+  }
+
+  this.totals = {
+    subtotal: this.subtotal ?? this.totals?.subtotal ?? 0,
+    delivery: this.deliveryFee ?? this.shippingCost ?? this.totals?.delivery ?? 0,
+    discount: this.discount ?? this.totals?.discount ?? 0,
+    total: this.total ?? this.totals?.total ?? 0
+  };
+
+  if ((this.subtotal === undefined || this.subtotal === null) && this.totals?.subtotal !== undefined) {
+    this.subtotal = this.totals.subtotal;
+  }
+  if ((this.total === undefined || this.total === null) && this.totals?.total !== undefined) {
+    this.total = this.totals.total;
+  }
+
   next();
 });
 
