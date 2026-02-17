@@ -74,6 +74,9 @@ const knowledgeRoutes = require('./routes/knowledge');
 const adminKnowledgeRoutes = require('./routes/adminKnowledge');
 const postsRoutes = require('./routes/posts');
 const adminPostsRoutes = require('./routes/adminPosts');
+const vendorToolkitRoutes = require('./routes/vendorToolkit');
+const adminPlaybookRoutes = require('./routes/adminPlaybook');
+const trackingRoutes = require('./routes/tracking');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -94,10 +97,12 @@ app.use('/api/admin', adminReviewsRoutes);
 app.use('/api/admin', adminNotificationsRoutes);
 app.use('/api/admin', adminKnowledgeRoutes);
 app.use('/api/admin', adminPostsRoutes);
+app.use('/api/admin', adminPlaybookRoutes);
 app.use('/api/vendor', vendorDocumentsRoutes);
 app.use('/api/vendor', vendorProductsRoutes);
 app.use('/api/vendor', vendorOrdersRoutes);
 app.use('/api/vendor', vendorFinanceRoutes);
+app.use('/api/vendor', vendorToolkitRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
@@ -108,6 +113,7 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/emails', emailRoutes);
 app.use('/api/knowledge', knowledgeRoutes);
 app.use('/api/posts', postsRoutes);
+app.use('/api/track', trackingRoutes);
 app.use('/debug', debugRoutes);
 
 app.get('/api/health', (req, res) => {

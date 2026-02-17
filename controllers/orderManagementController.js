@@ -6,6 +6,7 @@ const cloudinary = require('../utils/cloudinary');
 const { notifyUser } = require('../services/notificationService');
 const { buildAppUrl } = require('../utils/appUrl');
 const { issueInvoicesForOrder } = require('../services/invoiceService');
+const { recordPurchaseEventsForOrder } = require('../services/productAnalyticsService');
 
 // @desc    Upload payment proof
 // @route   POST /api/orders/:orderId/payment-proof
@@ -117,6 +118,7 @@ exports.confirmPayment = async (req, res, next) => {
     order.confirmedAt = new Date();
 
     await order.save();
+    await recordPurchaseEventsForOrder({ order, source: 'DIRECT', actorUserId: req.user.id });
     await issueInvoicesForOrder({ orderId: order._id, actorId: req.user.id });
 
     const customer = await User.findById(order.customer).select('name email role');
@@ -180,6 +182,9 @@ exports.rejectPayment = async (req, res, next) => {
     order.paymentConfirmedAt = new Date();
 
     await order.save();
+    if (status === 'confirmed') {
+      await recordPurchaseEventsForOrder({ order, source: 'DIRECT', actorUserId: req.user.id });
+    }
 
     const customer = await User.findById(order.customer).select('name email role');
     if (customer) {

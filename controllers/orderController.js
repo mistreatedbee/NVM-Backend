@@ -10,6 +10,7 @@ const User = require('../models/User');
 const { notifyUser } = require('../services/notificationService');
 const { buildAppUrl } = require('../utils/appUrl');
 const { issueInvoicesForOrder } = require('../services/invoiceService');
+const { recordPurchaseEventsForOrder } = require('../services/productAnalyticsService');
 
 // @desc    Create new order
 // @route   POST /api/orders
@@ -466,6 +467,9 @@ exports.updateOrderStatus = async (req, res, next) => {
     }
 
     await order.save();
+    if (status === 'confirmed') {
+      await recordPurchaseEventsForOrder({ order, source: 'DIRECT', actorUserId: req.user.id });
+    }
 
     const customer = await User.findById(order.customer).select('name email role');
     if (customer) {
