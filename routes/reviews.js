@@ -34,6 +34,7 @@ router.get('/vendor/:vendorId', paginationValidation, validate, getVendorReviews
 router.put('/:id', authenticate, validateId, validate, updateReview);
 router.delete('/:id', authenticate, validateId, validate, deleteReview);
 router.put('/:id/response', authenticate, isVendor, validateId, reviewResponseValidation, validate, addVendorResponse);
+router.post('/:id/helpful', authenticate, validateId, validate, markHelpful);
 router.put('/:id/helpful', authenticate, validateId, validate, markHelpful);
 router.post('/:id/report', authenticate, validateId, reviewReportValidation, validate, reportReview);
 router.put('/:id/moderate', authenticate, isAdmin, validateId, reviewModerationValidation, validate, moderateReview);

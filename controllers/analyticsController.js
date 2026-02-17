@@ -114,7 +114,7 @@ exports.getVendorAnalytics = async (req, res, next) => {
       .limit(5);
 
     // Reviews summary (vendor-level)
-    const reviewMatch = { vendor: vendor._id, isActive: true, isApproved: true };
+    const reviewMatch = { targetType: 'VENDOR', vendorId: vendor._id, status: 'APPROVED' };
     const reviewAgg = await Review.aggregate([
       { $match: reviewMatch },
       {

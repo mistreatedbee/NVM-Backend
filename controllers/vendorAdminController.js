@@ -158,9 +158,9 @@ async function getVendorMetrics(vendorId) {
   const reviewAgg = await Review.aggregate([
     {
       $match: {
-        vendor: objectId,
-        isActive: true,
-        status: 'PUBLISHED'
+        targetType: 'VENDOR',
+        vendorId: objectId,
+        status: 'APPROVED'
       }
     },
     {

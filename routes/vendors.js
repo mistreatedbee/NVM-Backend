@@ -25,6 +25,7 @@ const {
   approveVendor,
   rejectVendor
 } = require('../controllers/vendorController');
+const { getVendorReviewsByVendor } = require('../controllers/reviewController');
 const { authenticate, isAdmin } = require('../middleware/auth');
 const {
   vendorValidation,
@@ -55,6 +56,7 @@ router.get('/admin/:id', authenticate, isAdmin, validateId, validate, getAdminVe
 router.get('/me/profile', authenticate, getMyVendorProfile);
 router.get('/slug/:slug', getVendorBySlug);
 router.get('/:vendorId([0-9a-fA-F]{24})/profile', authenticate, validateVendorId, validate, getVendorProfileByVendorId);
+router.get('/:vendorId([0-9a-fA-F]{24})/reviews', validateVendorId, validate, paginationValidation, validate, getVendorReviewsByVendor);
 router.post('/:vendorId([0-9a-fA-F]{24})/profile', authenticate, validateVendorId, vendorProfileValidation, validate, upsertVendorProfile);
 router.put('/:vendorId([0-9a-fA-F]{24})/profile', authenticate, validateVendorId, vendorProfileValidation, validate, upsertVendorProfile);
 router.put(

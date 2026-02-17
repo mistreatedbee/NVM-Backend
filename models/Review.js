@@ -1,20 +1,38 @@
 const mongoose = require('mongoose');
 
+const reviewMediaSchema = new mongoose.Schema({
+  url: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  type: {
+    type: String,
+    enum: ['IMAGE', 'VIDEO'],
+    required: true
+  }
+}, { _id: false });
+
 const reviewSchema = new mongoose.Schema({
-  product: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Product'
-  },
-  vendor: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Vendor'
-  },
-  customer: {
+  reviewerId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
   },
-  order: {
+  targetType: {
+    type: String,
+    enum: ['PRODUCT', 'VENDOR'],
+    required: true
+  },
+  productId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Product'
+  },
+  vendorId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Vendor'
+  },
+  orderId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Order'
   },
@@ -29,105 +47,112 @@ const reviewSchema = new mongoose.Schema({
     trim: true,
     maxlength: [100, 'Review title cannot be more than 100 characters']
   },
-  comment: {
+  body: {
     type: String,
-    required: [true, 'Please provide a comment'],
-    maxlength: [1000, 'Comment cannot be more than 1000 characters']
+    required: [true, 'Please provide review text'],
+    minlength: [10, 'Review must be at least 10 characters'],
+    maxlength: [2000, 'Review cannot be more than 2000 characters']
   },
-  images: [{
-    public_id: String,
-    url: String
-  }],
-  videos: [{
-    public_id: String,
-    url: String,
-    duration: Number
-  }],
-  
-  // Moderation
-  isApproved: {
+  media: {
+    type: [reviewMediaSchema],
+    default: []
+  },
+
+  verifiedPurchase: {
     type: Boolean,
-    default: true
+    default: false
   },
-  moderatedBy: {
+  status: {
+    type: String,
+    enum: ['PENDING', 'APPROVED', 'REJECTED', 'HIDDEN'],
+    default: 'APPROVED'
+  },
+  moderation: {
+    reason: {
+      type: String,
+      maxlength: [500, 'Moderation reason cannot be more than 500 characters']
+    },
+    moderatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    moderatedAt: Date
+  },
+  deletedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
-  moderationReason: String,
-  
-  // Vendor Response
-  vendorResponse: {
-    comment: String,
-    respondedAt: Date
-  },
-  
-  // Helpful votes
+  deletedAt: Date,
+
   helpfulCount: {
     type: Number,
     default: 0
   },
-  helpfulVotes: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  }],
-  
-  // Verification
-  isVerifiedPurchase: {
-    type: Boolean,
-    default: false
-  },
-  
-  // Reporting & moderation workflow
-  reports: [{
-    reporter: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true
-    },
-    reason: {
-      type: String,
-      enum: ['spam', 'abuse', 'fake', 'off-topic', 'copyright', 'other'],
-      required: true
-    },
-    details: {
-      type: String,
-      maxlength: [500, 'Report details cannot be more than 500 characters']
-    },
-    status: {
-      type: String,
-      enum: ['open', 'resolved', 'dismissed'],
-      default: 'open'
-    },
-    handledBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    },
-    handledAt: Date
-  }],
-  reportCount: {
+  reportedCount: {
     type: Number,
     default: 0
-  },
-  
-  isActive: {
-    type: Boolean,
-    default: true
   }
 }, {
   timestamps: true
 });
 
 // Indexes
-reviewSchema.index({ product: 1 });
-reviewSchema.index({ vendor: 1 });
-reviewSchema.index({ customer: 1 });
+reviewSchema.index({ targetType: 1 });
+reviewSchema.index({ productId: 1, createdAt: -1 });
+reviewSchema.index({ vendorId: 1, createdAt: -1 });
+reviewSchema.index({ reviewerId: 1, createdAt: -1 });
+reviewSchema.index({ status: 1, createdAt: -1 });
 reviewSchema.index({ rating: 1 });
-reviewSchema.index({ createdAt: -1 });
-reviewSchema.index({ isApproved: 1 });
-reviewSchema.index({ reportCount: -1 });
-reviewSchema.index({ 'reports.status': 1 });
+reviewSchema.index({ helpfulCount: -1 });
 
-// Ensure one review per customer per product
-reviewSchema.index({ product: 1, customer: 1 }, { unique: true, sparse: true });
+// Prevent duplicates with order linkage where provided.
+reviewSchema.index(
+  { reviewerId: 1, targetType: 1, productId: 1, orderId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      targetType: 'PRODUCT',
+      productId: { $exists: true },
+      orderId: { $exists: true }
+    }
+  }
+);
+
+reviewSchema.index(
+  { reviewerId: 1, targetType: 1, vendorId: 1, orderId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      targetType: 'VENDOR',
+      vendorId: { $exists: true },
+      orderId: { $exists: true }
+    }
+  }
+);
+
+// If no order is supplied, allow only one review per target.
+reviewSchema.index(
+  { reviewerId: 1, targetType: 1, productId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      targetType: 'PRODUCT',
+      productId: { $exists: true },
+      orderId: { $exists: false }
+    }
+  }
+);
+
+reviewSchema.index(
+  { reviewerId: 1, targetType: 1, vendorId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      targetType: 'VENDOR',
+      vendorId: { $exists: true },
+      orderId: { $exists: false }
+    }
+  }
+);
 
 module.exports = mongoose.model('Review', reviewSchema);

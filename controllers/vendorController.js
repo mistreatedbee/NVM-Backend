@@ -1005,7 +1005,7 @@ exports.getVendorPerformanceOverview = async (req, res, next) => {
 
     const productCount = await Product.countDocuments({ vendor: vendor._id, isActive: true });
     const reviewSummary = await Review.aggregate([
-      { $match: { vendor: vendor._id, status: 'PUBLISHED', isActive: true } },
+      { $match: { targetType: 'VENDOR', vendorId: vendor._id, status: 'APPROVED' } },
       {
         $group: {
           _id: null,

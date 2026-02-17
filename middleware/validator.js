@@ -229,6 +229,18 @@ exports.vendorComplianceValidation = [
 
 // Review validation
 exports.reviewValidation = [
+  body('targetType')
+    .optional()
+    .isIn(['PRODUCT', 'VENDOR']).withMessage('targetType must be PRODUCT or VENDOR'),
+  body('productId')
+    .optional()
+    .isMongoId().withMessage('Invalid productId'),
+  body('vendorId')
+    .optional()
+    .isMongoId().withMessage('Invalid vendorId'),
+  body('orderId')
+    .optional()
+    .isMongoId().withMessage('Invalid orderId'),
   body('product')
     .optional()
     .isMongoId().withMessage('Invalid product ID'),
@@ -245,10 +257,31 @@ exports.reviewValidation = [
     .optional()
     .trim()
     .isLength({ max: 100 }).withMessage('Title cannot exceed 100 characters'),
+  body('body')
+    .optional()
+    .trim()
+    .isLength({ min: 10, max: 2000 }).withMessage('Body must be 10..2000 characters'),
   body('comment')
     .trim()
+    .optional()
     .notEmpty().withMessage('Comment is required')
-    .isLength({ max: 1000 }).withMessage('Comment cannot exceed 1000 characters'),
+    .isLength({ max: 2000 }).withMessage('Comment cannot exceed 2000 characters'),
+  body().custom((value) => {
+    const bodyText = value?.body || value?.comment;
+    if (!bodyText || !String(bodyText).trim()) {
+      throw new Error('body is required');
+    }
+    return true;
+  }),
+  body('media')
+    .optional()
+    .isArray({ max: 5 }).withMessage('You can upload up to 5 media items'),
+  body('media.*.url')
+    .optional()
+    .isString().withMessage('Media URL must be a string'),
+  body('media.*.type')
+    .optional()
+    .isIn(['IMAGE', 'VIDEO']).withMessage('Media type must be IMAGE or VIDEO'),
   body('images')
     .optional()
     .isArray({ max: 10 }).withMessage('You can upload up to 10 images'),
@@ -278,7 +311,7 @@ exports.reviewReportValidation = [
 exports.reviewModerationValidation = [
   body('action')
     .notEmpty().withMessage('Action is required')
-    .isIn(['approve', 'reject', 'restore', 'resolve-reports', 'dismiss-reports'])
+    .isIn(['approve', 'reject', 'hide', 'restore', 'resolve-reports', 'dismiss-reports'])
     .withMessage('Invalid moderation action'),
   body('reason')
     .optional()

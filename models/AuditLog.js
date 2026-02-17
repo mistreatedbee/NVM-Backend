@@ -18,7 +18,7 @@ const auditLogSchema = new mongoose.Schema({
   },
   entityType: {
     type: String,
-    enum: ['Conversation', 'Message', 'SupportTicket', 'Notification', 'Vendor', 'User', 'Order', 'System', 'Document', 'Product', 'Invoice', 'VendorTransaction'],
+    enum: ['Conversation', 'Message', 'SupportTicket', 'Notification', 'Vendor', 'User', 'Order', 'System', 'Document', 'Product', 'Invoice', 'VendorTransaction', 'Review'],
     default: 'System'
   },
   entityId: {
@@ -48,7 +48,11 @@ const auditLogSchema = new mongoose.Schema({
       'PRODUCT_REJECT',
       'PRODUCT_UNPUBLISH',
       'PRODUCT_PUBLISH',
-      'PRODUCT_FLAG'
+      'PRODUCT_FLAG',
+      'REVIEW_APPROVE',
+      'REVIEW_REJECT',
+      'REVIEW_HIDE',
+      'REVIEW_DELETE'
     ],
     default: null
   },

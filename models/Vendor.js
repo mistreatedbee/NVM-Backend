@@ -296,7 +296,17 @@ const vendorSchema = new mongoose.Schema({
     min: 0,
     max: 5
   },
+  vendorRatingAvg: {
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 5
+  },
   totalReviews: {
+    type: Number,
+    default: 0
+  },
+  vendorRatingCount: {
     type: Number,
     default: 0
   },
