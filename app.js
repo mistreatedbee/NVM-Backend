@@ -72,6 +72,8 @@ const adminReviewsRoutes = require('./routes/adminReviews');
 const adminNotificationsRoutes = require('./routes/adminNotifications');
 const knowledgeRoutes = require('./routes/knowledge');
 const adminKnowledgeRoutes = require('./routes/adminKnowledge');
+const postsRoutes = require('./routes/posts');
+const adminPostsRoutes = require('./routes/adminPosts');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -91,6 +93,7 @@ app.use('/api/admin', adminInvoiceRoutes);
 app.use('/api/admin', adminReviewsRoutes);
 app.use('/api/admin', adminNotificationsRoutes);
 app.use('/api/admin', adminKnowledgeRoutes);
+app.use('/api/admin', adminPostsRoutes);
 app.use('/api/vendor', vendorDocumentsRoutes);
 app.use('/api/vendor', vendorProductsRoutes);
 app.use('/api/vendor', vendorOrdersRoutes);
@@ -104,6 +107,7 @@ app.use('/api/invoices', invoiceRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/emails', emailRoutes);
 app.use('/api/knowledge', knowledgeRoutes);
+app.use('/api/posts', postsRoutes);
 app.use('/debug', debugRoutes);
 
 app.get('/api/health', (req, res) => {
