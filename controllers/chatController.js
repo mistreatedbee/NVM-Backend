@@ -109,7 +109,8 @@ async function writeAuditLog({ actorId, actorRole, action, entityType, entityId,
 
 async function createAdminNotifications(title, message, data = {}) {
   await notifyAdmins({
-    type: 'CHAT_ESCALATION',
+    type: 'SYSTEM',
+    subType: 'CHATBOT_ESCALATION',
     title,
     message,
     linkUrl: '/admin/chats',

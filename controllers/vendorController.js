@@ -273,6 +273,7 @@ exports.createVendor = async (req, res, next) => {
     await notifyUser({
       user: req.user,
       type: 'APPROVAL',
+      subType: 'VENDOR_SUBMITTED',
       title: 'Vendor registration submitted',
       message: 'Your application is pending admin approval.',
       linkUrl: '/vendor/approval-status',
@@ -291,7 +292,8 @@ exports.createVendor = async (req, res, next) => {
     });
 
     await notifyAdmins({
-      type: 'APPROVAL',
+      type: 'SYSTEM',
+      subType: 'NEW_VENDOR_PENDING_APPROVAL',
       title: 'New vendor awaiting approval',
       message: `${vendor.storeName} submitted registration and needs review.`,
       linkUrl: `/admin/vendors`,
@@ -695,6 +697,14 @@ exports.updateVendorStatus = async (req, res, next) => {
     await notifyUser({
       user,
       type: 'ACCOUNT',
+      subType:
+        accountStatus === 'suspended'
+          ? 'ACCOUNT_SUSPENDED'
+          : accountStatus === 'banned'
+            ? 'ACCOUNT_BANNED'
+            : accountStatus === 'active'
+              ? 'ACCOUNT_UNSUSPENDED'
+              : 'ACCOUNT_STATUS_UPDATED',
       title: 'Account status updated',
       message: `Your vendor account status is now ${accountStatus}.`,
       linkUrl: '/vendor/approval-status',
@@ -803,6 +813,19 @@ exports.uploadVendorDocument = async (req, res, next) => {
       performedByRole: req.user.role
     });
     await vendor.save();
+
+    await notifyAdmins({
+      type: 'SYSTEM',
+      subType: 'NEW_VENDOR_PENDING_APPROVAL',
+      title: 'New vendor document pending review',
+      message: `${vendor.storeName} uploaded ${req.body.type} for verification review.`,
+      linkUrl: `/admin/vendors/${vendor._id}`,
+      metadata: {
+        event: 'vendor.document.pending-review',
+        vendorId: vendor._id.toString(),
+        documentType: req.body.type
+      }
+    });
 
     res.status(201).json({
       success: true,
@@ -1401,6 +1424,7 @@ exports.approveVendor = async (req, res, next) => {
     await notifyUser({
       user,
       type: 'APPROVAL',
+      subType: 'VENDOR_APPROVED',
       title: 'Vendor application approved',
       message: `${vendor.storeName} is approved and active.`,
       linkUrl: '/vendor/dashboard',
@@ -1484,6 +1508,7 @@ exports.rejectVendor = async (req, res, next) => {
       await notifyUser({
         user,
         type: 'APPROVAL',
+        subType: 'VENDOR_REJECTED',
         title: 'Vendor application rejected',
         message: req.body.reason
           ? `Reason: ${req.body.reason}`

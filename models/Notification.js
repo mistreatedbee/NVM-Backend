@@ -1,5 +1,20 @@
 const mongoose = require('mongoose');
 
+function normalizeRole(role) {
+  const value = String(role || '').toUpperCase();
+  if (value === 'ADMIN') return 'ADMIN';
+  if (value === 'VENDOR') return 'VENDOR';
+  return 'CUSTOMER';
+}
+
+function normalizeType(type) {
+  const value = String(type || '').toUpperCase();
+  if (value === 'ORDER') return 'ORDER';
+  if (value === 'VENDOR_APPROVAL' || value === 'APPROVAL') return 'VENDOR_APPROVAL';
+  if (value === 'ACCOUNT_STATUS' || value === 'ACCOUNT' || value === 'SECURITY') return 'ACCOUNT_STATUS';
+  return 'SYSTEM';
+}
+
 const notificationSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -9,13 +24,19 @@ const notificationSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['customer', 'vendor', 'admin'],
+    enum: ['CUSTOMER', 'VENDOR', 'ADMIN'],
+    set: normalizeRole,
     required: true
   },
   type: {
     type: String,
-    enum: ['ORDER', 'APPROVAL', 'ACCOUNT', 'CHAT_ESCALATION', 'SYSTEM', 'PAYOUT', 'REVIEW', 'SECURITY'],
+    enum: ['ORDER', 'VENDOR_APPROVAL', 'ACCOUNT_STATUS', 'SYSTEM'],
+    set: normalizeType,
     required: true
+  },
+  subType: {
+    type: String,
+    default: 'GENERAL'
   },
   title: {
     type: String,
@@ -43,7 +64,8 @@ const notificationSchema = new mongoose.Schema({
 });
 
 notificationSchema.index({ userId: 1, isRead: 1 });
-notificationSchema.index({ createdAt: -1 });
+notificationSchema.index({ userId: 1, createdAt: -1 });
+notificationSchema.index({ type: 1, createdAt: -1 });
 notificationSchema.index({ role: 1, type: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Notification', notificationSchema);

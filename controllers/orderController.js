@@ -136,6 +136,7 @@ exports.createOrder = async (req, res, next) => {
     await notifyUser({
       user: req.user,
       type: 'ORDER',
+      subType: 'ORDER_PLACED',
       title: 'Order placed successfully',
       message: `Your order ${order.orderNumber} has been placed.`,
       linkUrl: `/orders/${order._id}/track`,
@@ -171,6 +172,7 @@ exports.createOrder = async (req, res, next) => {
       await notifyUser({
         user: vendorUser,
         type: 'ORDER',
+        subType: 'NEW_ORDER_RECEIVED',
         title: 'New order received',
         message: `You received order ${order.orderNumber}.`,
         linkUrl: `/vendor/orders/${order._id}`,
@@ -197,6 +199,7 @@ exports.createOrder = async (req, res, next) => {
     await notifyUser({
       user: req.user,
       type: 'ORDER',
+      subType: 'INVOICE_AVAILABLE',
       title: 'Invoice available',
       message: `Invoice for order ${order.orderNumber} is ready.`,
       linkUrl: `/orders/${order._id}/invoice`,
@@ -473,6 +476,7 @@ exports.updateOrderStatus = async (req, res, next) => {
       await notifyUser({
         user: customer,
         type: 'ORDER',
+        subType: status === 'confirmed' ? 'ORDER_CONFIRMED' : 'ORDER_STATUS_UPDATED',
         title: `Order status: ${status}`,
         message: `Your order ${order.orderNumber} is now ${status}.`,
         linkUrl: `/orders/${order._id}/track`,
@@ -500,7 +504,8 @@ exports.updateOrderStatus = async (req, res, next) => {
     if (status === 'cancelled' && customer) {
       await notifyUser({
         user: customer,
-        type: 'ACCOUNT',
+        type: 'ORDER',
+        subType: 'ORDER_CANCELLED',
         title: 'Order cancelled',
         message: `Order ${order.orderNumber} has been cancelled.`,
         linkUrl: `/orders/${order._id}/track`,
@@ -558,6 +563,48 @@ exports.cancelOrder = async (req, res, next) => {
         product.totalSales = Math.max(0, product.totalSales - item.quantity);
         await product.save();
       }
+    }
+
+    const customer = await User.findById(order.customer).select('name email role');
+    if (customer) {
+      await notifyUser({
+        user: customer,
+        type: 'ORDER',
+        subType: 'ORDER_CANCELLED',
+        title: 'Order cancelled',
+        message: `Order ${order.orderNumber} has been cancelled.`,
+        linkUrl: `/orders/${order._id}/track`,
+        metadata: {
+          event: 'order.cancelled',
+          orderId: order._id.toString(),
+          orderNumber: order.orderNumber,
+          reason: req.body.reason || null
+        }
+      });
+    }
+
+    const vendorIds = [...new Set(order.items.map((item) => String(item.vendor || item.vendorId)))];
+    for (const vendorId of vendorIds) {
+      const vendor = await Vendor.findById(vendorId).select('user');
+      if (!vendor?.user) continue;
+
+      const vendorUser = await User.findById(vendor.user).select('name email role');
+      if (!vendorUser) continue;
+
+      await notifyUser({
+        user: vendorUser,
+        type: 'ORDER',
+        subType: 'ORDER_CANCELLED',
+        title: 'Order cancelled',
+        message: `Order ${order.orderNumber} was cancelled and affects your items.`,
+        linkUrl: `/vendor/orders/${order._id}`,
+        metadata: {
+          event: 'order.cancelled.vendor-impact',
+          orderId: order._id.toString(),
+          orderNumber: order.orderNumber,
+          vendorId
+        }
+      });
     }
 
     res.status(200).json({

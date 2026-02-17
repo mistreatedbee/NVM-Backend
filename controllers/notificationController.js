@@ -1,4 +1,28 @@
 const Notification = require('../models/Notification');
+const User = require('../models/User');
+const AuditLog = require('../models/AuditLog');
+const { createManyNotifications } = require('../services/notificationService');
+
+function normalizeType(type) {
+  const value = String(type || '').toUpperCase();
+  if (value === 'ORDER') return 'ORDER';
+  if (value === 'VENDOR_APPROVAL' || value === 'APPROVAL') return 'VENDOR_APPROVAL';
+  if (value === 'ACCOUNT_STATUS' || value === 'ACCOUNT' || value === 'SECURITY') return 'ACCOUNT_STATUS';
+  return 'SYSTEM';
+}
+
+function normalizeRoles(roles = []) {
+  const roleMap = {
+    CUSTOMER: 'customer',
+    VENDOR: 'vendor',
+    ADMIN: 'admin'
+  };
+  const normalized = (Array.isArray(roles) ? roles : [])
+    .map((role) => String(role || '').toUpperCase())
+    .filter((role) => roleMap[role])
+    .map((role) => roleMap[role]);
+  return [...new Set(normalized)];
+}
 
 // @desc    Get user notifications
 // @route   GET /api/notifications
@@ -10,8 +34,9 @@ exports.getNotifications = async (req, res, next) => {
     const skip = (page - 1) * limit;
 
     const query = { userId: req.user.id };
-    if (req.query.isRead === 'true') query.isRead = true;
-    if (req.query.isRead === 'false') query.isRead = false;
+    if (req.query.unreadOnly === 'true' || req.query.isRead === 'false') query.isRead = false;
+    if (req.query.unreadOnly === 'false' || req.query.isRead === 'true') query.isRead = true;
+    if (req.query.type) query.type = normalizeType(req.query.type);
 
     const [notifications, total, unreadCount] = await Promise.all([
       Notification.find(query)
@@ -109,5 +134,109 @@ exports.deleteNotification = async (req, res, next) => {
     res.status(200).json({ success: true, data: notification });
   } catch (error) {
     next(error);
+  }
+};
+
+// @desc    Broadcast system notification
+// @route   POST /api/admin/notifications/broadcast
+// @access  Private/Admin
+exports.broadcastNotification = async (req, res, next) => {
+  try {
+    const {
+      roles,
+      title,
+      message,
+      linkUrl,
+      type = 'SYSTEM',
+      subType = 'SYSTEM_BROADCAST',
+      metadata = {}
+    } = req.body || {};
+
+    if (!Array.isArray(roles) || !roles.length) {
+      return res.status(400).json({ success: false, message: 'roles is required (array)' });
+    }
+    if (!title || !message) {
+      return res.status(400).json({ success: false, message: 'title and message are required' });
+    }
+
+    const targetRoles = normalizeRoles(roles);
+    if (!targetRoles.length) {
+      return res.status(400).json({ success: false, message: 'No valid roles provided' });
+    }
+
+    const users = await User.find({
+      role: { $in: targetRoles },
+      isActive: true,
+      isBanned: false
+    }).select('_id role');
+
+    if (!users.length) {
+      return res.status(200).json({
+        success: true,
+        message: 'No matching active users found',
+        insertedCount: 0
+      });
+    }
+
+    const notifications = users.map((user) => ({
+      userId: user._id,
+      role: user.role,
+      type,
+      subType,
+      title,
+      message,
+      linkUrl,
+      metadata: {
+        ...metadata,
+        broadcastByAdminId: req.user.id,
+        roles: targetRoles
+      }
+    }));
+
+    const inserted = await createManyNotifications(notifications);
+
+    const normalizedType = normalizeType(type);
+
+    await AuditLog.create({
+      actorAdminId: req.user.id,
+      actorId: req.user.id,
+      actorRole: 'Admin',
+      actionType: 'NOTIFICATION_BROADCAST',
+      action: 'NOTIFICATION_BROADCAST',
+      entityType: 'System',
+      metadata: {
+        targetRoles,
+        title,
+        linkUrl: linkUrl || null,
+        type: normalizedType,
+        subType,
+        insertedCount: inserted.length
+      }
+    });
+
+    if (normalizedType === 'SYSTEM') {
+      await AuditLog.create({
+        actorAdminId: req.user.id,
+        actorId: req.user.id,
+        actorRole: 'Admin',
+        actionType: 'ADMIN_ALERT_CREATED',
+        action: 'ADMIN_ALERT_CREATED',
+        entityType: 'System',
+        metadata: {
+          targetRoles,
+          title,
+          subType,
+          insertedCount: inserted.length
+        }
+      });
+    }
+
+    return res.status(201).json({
+      success: true,
+      insertedCount: inserted.length,
+      message: 'Broadcast notifications created'
+    });
+  } catch (error) {
+    return next(error);
   }
 };

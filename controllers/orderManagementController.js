@@ -66,6 +66,7 @@ exports.uploadPaymentProof = async (req, res, next) => {
       await notifyUser({
         user: vendorUser,
         type: 'ORDER',
+        subType: 'PAYMENT_PROOF_UPLOADED',
         title: 'Payment proof uploaded',
         message: `Customer uploaded proof for order ${order.orderNumber}.`,
         linkUrl: `/vendor/orders/${order._id}`,
@@ -123,6 +124,7 @@ exports.confirmPayment = async (req, res, next) => {
       await notifyUser({
         user: customer,
         type: 'ORDER',
+        subType: 'ORDER_CONFIRMED',
         title: 'Payment confirmed',
         message: `Payment for order ${order.orderNumber} was confirmed.`,
         linkUrl: `/orders/${order._id}/track`,
@@ -184,6 +186,7 @@ exports.rejectPayment = async (req, res, next) => {
       await notifyUser({
         user: customer,
         type: 'ORDER',
+        subType: 'PAYMENT_REJECTED',
         title: 'Payment rejected',
         message: `Payment for order ${order.orderNumber} was rejected: ${reason}`,
         linkUrl: `/orders/${order._id}/track`,
@@ -255,6 +258,7 @@ exports.updateOrderStatus = async (req, res, next) => {
       await notifyUser({
         user: customer,
         type: 'ORDER',
+        subType: status === 'confirmed' ? 'ORDER_CONFIRMED' : 'ORDER_STATUS_UPDATED',
         title: `Order status: ${status}`,
         message: `Order ${order.orderNumber} is now ${status}.`,
         linkUrl: `/orders/${order._id}/track`,

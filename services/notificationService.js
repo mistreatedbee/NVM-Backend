@@ -11,19 +11,39 @@ function toAuditRole(role) {
   return 'System';
 }
 
+function normalizeRole(role) {
+  const value = String(role || '').toUpperCase();
+  if (value === 'ADMIN') return 'ADMIN';
+  if (value === 'VENDOR') return 'VENDOR';
+  return 'CUSTOMER';
+}
+
 function normalizeType(type) {
   const value = String(type || '').toUpperCase();
-  const allowed = new Set(['ORDER', 'APPROVAL', 'ACCOUNT', 'CHAT_ESCALATION', 'SYSTEM', 'PAYOUT', 'REVIEW', 'SECURITY']);
-  if (allowed.has(value)) return value;
-
-  if (value.includes('ORDER')) return 'ORDER';
-  if (value.includes('APPROVAL') || value.includes('VENDOR')) return 'APPROVAL';
-  if (value.includes('ACCOUNT')) return 'ACCOUNT';
-  if (value.includes('CHAT') || value.includes('ESCALAT')) return 'CHAT_ESCALATION';
-  if (value.includes('PAYOUT')) return 'PAYOUT';
-  if (value.includes('REVIEW')) return 'REVIEW';
-  if (value.includes('SECUR')) return 'SECURITY';
+  if (value === 'ORDER') return 'ORDER';
+  if (value === 'VENDOR_APPROVAL' || value === 'APPROVAL') return 'VENDOR_APPROVAL';
+  if (value === 'ACCOUNT_STATUS' || value === 'ACCOUNT' || value === 'SECURITY') return 'ACCOUNT_STATUS';
   return 'SYSTEM';
+}
+
+function inferSubType(subType, metadata = {}, fallbackType = 'SYSTEM') {
+  if (subType && String(subType).trim()) {
+    return String(subType).trim().toUpperCase();
+  }
+
+  const eventHint = metadata?.subType || metadata?.event || metadata?.action;
+  if (eventHint) {
+    return String(eventHint)
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+  }
+
+  if (fallbackType === 'ORDER') return 'ORDER_STATUS_UPDATED';
+  if (fallbackType === 'VENDOR_APPROVAL') return 'VENDOR_STATUS_UPDATE';
+  if (fallbackType === 'ACCOUNT_STATUS') return 'ACCOUNT_STATUS_UPDATE';
+  return 'SYSTEM_ALERT';
 }
 
 async function emitRealtimeNotification(notification) {
@@ -31,23 +51,48 @@ async function emitRealtimeNotification(notification) {
     const io = getIO();
     io.to(`user:${String(notification.userId)}`).emit('notifications:new', notification);
   } catch (_error) {
-    // Socket server may be unavailable in tests or offline workers.
+    // Socket server can be unavailable in tests or non-realtime workers.
   }
 }
 
-async function createInAppNotification({
+function isEmailAvailable() {
+  const hasBrevoApi = Boolean(process.env.BREVO_API_KEY);
+  const hasSmtp = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+  return hasBrevoApi || hasSmtp;
+}
+
+async function safeSendTemplateEmail({ to, templateId, context, metadata }) {
+  if (!to) return { skipped: true, reason: 'missing-email' };
+  if (!isEmailAvailable()) return { skipped: true, reason: 'email-not-configured' };
+
+  try {
+    return await sendTemplate(templateId, to, context, metadata);
+  } catch (error) {
+    console.error('[notification] email send failed', {
+      to,
+      templateId,
+      error: error.message
+    });
+    return { skipped: true, reason: 'send-failed', error: error.message };
+  }
+}
+
+async function createNotification({
   userId,
   role,
   type,
+  subType,
   title,
   message,
   linkUrl,
   metadata
 }) {
+  const normalizedType = normalizeType(type);
   const notification = await Notification.create({
     userId,
-    role: role || 'customer',
-    type: normalizeType(type),
+    role: normalizeRole(role),
+    type: normalizedType,
+    subType: inferSubType(subType, metadata, normalizedType),
     title,
     message,
     linkUrl,
@@ -58,24 +103,61 @@ async function createInAppNotification({
   return notification;
 }
 
-async function safeSendTemplateEmail({ to, templateId, context, metadata }) {
-  if (!to) return { skipped: true, reason: 'missing-email' };
-
-  try {
-    return await sendTemplate(templateId, to, context, metadata);
-  } catch (error) {
-    console.error('[notification] email send failed', {
-      to,
-      templateId,
-      error: error.message
-    });
-    return { skipped: true, reason: 'send-failed' };
+async function createManyNotifications(items = []) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return [];
   }
+
+  const documents = items.map((item) => {
+    const normalizedType = normalizeType(item.type);
+    return {
+      userId: item.userId,
+      role: normalizeRole(item.role),
+      type: normalizedType,
+      subType: inferSubType(item.subType, item.metadata, normalizedType),
+      title: item.title,
+      message: item.message,
+      linkUrl: item.linkUrl,
+      metadata: item.metadata
+    };
+  });
+
+  const inserted = await Notification.insertMany(documents, { ordered: false });
+  for (const notification of inserted) {
+    await emitRealtimeNotification(notification);
+  }
+  return inserted;
+}
+
+async function notifyUserAndEmail(userId, templateName, variables = {}, notificationPayload = {}) {
+  const user = await User.findById(userId).select('name email role');
+  if (!user) return null;
+
+  const notification = await createNotification({
+    userId: user._id,
+    role: user.role,
+    ...notificationPayload
+  });
+
+  if (templateName) {
+    await safeSendTemplateEmail({
+      to: user.email,
+      templateId: templateName,
+      context: {
+        userName: user.name,
+        ...variables
+      },
+      metadata: notificationPayload.metadata || {}
+    });
+  }
+
+  return notification;
 }
 
 async function notifyUser({
   user,
   type,
+  subType,
   title,
   message,
   linkUrl,
@@ -84,14 +166,13 @@ async function notifyUser({
   emailContext,
   actor
 }) {
-  if (!user?._id) {
-    return null;
-  }
+  if (!user?._id) return null;
 
-  const notification = await createInAppNotification({
+  const notification = await createNotification({
     userId: user._id,
     role: user.role,
     type,
+    subType,
     title,
     message,
     linkUrl,
@@ -119,7 +200,8 @@ async function notifyUser({
       entityId: notification._id,
       metadata: {
         userId: user._id,
-        type,
+        type: normalizeType(type),
+        subType: notification.subType,
         ...metadata
       }
     });
@@ -128,18 +210,25 @@ async function notifyUser({
   return notification;
 }
 
-async function notifyAdmins({ type, title, message, linkUrl, metadata, emailTemplate, emailContext }) {
+async function notifyAdmins({
+  type,
+  subType,
+  title,
+  message,
+  linkUrl,
+  metadata,
+  emailTemplate,
+  emailContext
+}) {
   const admins = await User.find({ role: 'admin', isActive: true, isBanned: false }).select('name email role');
-
-  if (!admins.length) {
-    return [];
-  }
+  if (!admins.length) return [];
 
   const notifications = [];
   for (const admin of admins) {
     const notification = await notifyUser({
       user: admin,
-      type,
+      type: type || 'SYSTEM',
+      subType,
       title,
       message,
       linkUrl,
@@ -153,7 +242,6 @@ async function notifyAdmins({ type, title, message, linkUrl, metadata, emailTemp
     });
     notifications.push(notification);
   }
-
   return notifications;
 }
 
@@ -164,7 +252,9 @@ async function markAllRead(userId) {
 module.exports = {
   notifyUser,
   notifyAdmins,
-  createInAppNotification,
+  createNotification,
+  createManyNotifications,
+  notifyUserAndEmail,
   safeSendTemplateEmail,
   markAllRead,
   toAuditRole

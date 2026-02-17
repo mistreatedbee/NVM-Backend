@@ -61,6 +61,7 @@ exports.ban = async (req, res, next) => {
     await notifyUser({
       user,
       type: 'ACCOUNT',
+      subType: 'ACCOUNT_BANNED',
       title: 'Account banned',
       message: 'Your account has been banned by an administrator.',
       linkUrl: '/login',
@@ -111,6 +112,7 @@ exports.unban = async (req, res, next) => {
     await notifyUser({
       user,
       type: 'ACCOUNT',
+      subType: 'ACCOUNT_UNBANNED',
       title: 'Account restored',
       message: 'Your account access has been restored.',
       linkUrl: '/login',

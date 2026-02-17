@@ -376,6 +376,7 @@ exports.approveVendor = async (req, res, next) => {
       await notifyUser({
         user,
         type: 'APPROVAL',
+        subType: 'VENDOR_APPROVED',
         title: 'Vendor account approved',
         message: 'Your vendor account is now active and verified.',
         linkUrl: '/vendor/dashboard',
@@ -427,6 +428,7 @@ exports.rejectVendor = async (req, res, next) => {
       await notifyUser({
         user,
         type: 'APPROVAL',
+        subType: 'VENDOR_REJECTED',
         title: 'Vendor account rejected',
         message: reason,
         linkUrl: '/vendor/approval-status',
@@ -477,6 +479,7 @@ exports.suspendVendor = async (req, res, next) => {
       await notifyUser({
         user,
         type: 'ACCOUNT',
+        subType: 'ACCOUNT_SUSPENDED',
         title: 'Vendor account suspended',
         message: reason,
         linkUrl: '/vendor/approval-status',
@@ -526,6 +529,7 @@ exports.unsuspendVendor = async (req, res, next) => {
       await notifyUser({
         user,
         type: 'ACCOUNT',
+        subType: 'ACCOUNT_UNSUSPENDED',
         title: 'Vendor account restored',
         message: 'Your vendor account suspension has been removed.',
         linkUrl: '/vendor/dashboard',
@@ -740,6 +744,7 @@ exports.approveDocument = async (req, res, next) => {
       await notifyUser({
         user,
         type: 'APPROVAL',
+        subType: 'VENDOR_DOCUMENT_APPROVED',
         title: 'Document approved',
         message: `${document.docType} document was approved.`,
         linkUrl: '/vendor/documents',
@@ -780,6 +785,7 @@ exports.rejectDocument = async (req, res, next) => {
       await notifyUser({
         user,
         type: 'APPROVAL',
+        subType: 'VENDOR_DOCUMENT_REJECTED',
         title: 'Document rejected',
         message: note || `${document.docType} document was rejected.`,
         linkUrl: '/vendor/documents',

@@ -55,6 +55,7 @@ async function queueVerification(user, actorRole = 'System', templateId = 'verif
     await notifyUser({
       user,
       type: 'SECURITY',
+      subType: 'EMAIL_VERIFICATION_REQUIRED',
       title: 'Verify your email',
       message: 'Please verify your email address to secure your account.',
       linkUrl: '/verify-email',
@@ -184,6 +185,7 @@ exports.verifyEmail = async (req, res, next) => {
     await notifyUser({
       user,
       type: 'SECURITY',
+      subType: 'EMAIL_VERIFIED',
       title: 'Email verified',
       message: 'Your email address has been verified successfully.',
       linkUrl: '/customer/dashboard',
@@ -276,6 +278,7 @@ exports.forgotPassword = async (req, res, next) => {
     await notifyUser({
       user,
       type: 'SECURITY',
+      subType: 'PASSWORD_RESET_REQUESTED',
         title: 'Password reset requested',
         message: 'If this was not you, secure your account immediately.',
         linkUrl: '/profile',

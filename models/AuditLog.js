@@ -52,7 +52,9 @@ const auditLogSchema = new mongoose.Schema({
       'REVIEW_APPROVE',
       'REVIEW_REJECT',
       'REVIEW_HIDE',
-      'REVIEW_DELETE'
+      'REVIEW_DELETE',
+      'NOTIFICATION_BROADCAST',
+      'ADMIN_ALERT_CREATED'
     ],
     default: null
   },
