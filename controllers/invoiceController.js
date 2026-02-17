@@ -1,324 +1,343 @@
+const mongoose = require('mongoose');
+const Invoice = require('../models/Invoice');
 const Order = require('../models/Order');
 const Vendor = require('../models/Vendor');
-// const PDFDocument = require('pdfkit'); // Install with: npm install pdfkit
-const fs = require('fs');
-const path = require('path');
+const AuditLog = require('../models/AuditLog');
+const { issueInvoicesForOrder } = require('../services/invoiceService');
+const { generateInvoicePdfBuffer } = require('../services/invoicePdfService');
 
-// @desc    Generate invoice for an order
-// @route   GET /api/invoices/:orderId
-// @access  Private (Customer/Vendor/Admin)
-exports.generateInvoice = async (req, res, next) => {
-  return res.status(501).json({
-    success: false,
-    message: 'Invoice generation requires pdfkit package. Run: npm install pdfkit'
+function isObjectId(id) {
+  return mongoose.Types.ObjectId.isValid(id);
+}
+
+function parsePagination(query) {
+  const page = Math.max(1, parseInt(query.page, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(query.limit, 10) || 20));
+  return { page, limit, skip: (page - 1) * limit };
+}
+
+async function resolveVendorIdForUser(userId) {
+  const vendor = await Vendor.findOne({ user: userId }).select('_id');
+  return vendor?._id || null;
+}
+
+async function logInvoiceAudit(action, invoice, actor) {
+  await AuditLog.create({
+    actorId: actor?.id || null,
+    actorRole: actor?.role === 'admin' ? 'Admin' : actor?.role === 'vendor' ? 'Vendor' : actor?.role === 'customer' ? 'Customer' : 'System',
+    action,
+    entityType: 'Invoice',
+    entityId: invoice._id,
+    metadata: {
+      invoiceId: String(invoice._id),
+      invoiceNumber: invoice.invoiceNumber,
+      orderId: String(invoice.orderId),
+      type: invoice.type
+    }
   });
-  /* Disabled until pdfkit is installed
-  try {
-    const order = await Order.findById(req.params.orderId)
-      .populate('customer', 'name email phone')
-      .populate('items.product', 'name')
-      .populate('items.vendor', 'storeName email phone address bankDetails');
+}
 
+function buildInvoiceQueryForAdmin(query) {
+  const mongoQuery = {};
+  if (query.vendorId && isObjectId(query.vendorId)) mongoQuery.vendorId = query.vendorId;
+  if (query.customerId && isObjectId(query.customerId)) mongoQuery.customerId = query.customerId;
+  if (query.orderId && isObjectId(query.orderId)) mongoQuery.orderId = query.orderId;
+  if (query.status) mongoQuery.status = String(query.status).toUpperCase();
+  if (query.q) {
+    mongoQuery.$or = [
+      { invoiceNumber: { $regex: String(query.q).trim(), $options: 'i' } },
+      { 'metadata.orderNumber': { $regex: String(query.q).trim(), $options: 'i' } }
+    ];
+  }
+  return mongoQuery;
+}
+
+async function fetchInvoiceForCustomer(invoiceId, customerId) {
+  return Invoice.findOne({ _id: invoiceId, customerId, type: 'CUSTOMER' });
+}
+
+async function fetchInvoiceForVendor(invoiceId, userId) {
+  const vendorId = await resolveVendorIdForUser(userId);
+  if (!vendorId) return null;
+  return Invoice.findOne({ _id: invoiceId, vendorId, type: 'VENDOR' });
+}
+
+async function streamInvoicePdf(res, invoice, actor) {
+  const buffer = await generateInvoicePdfBuffer(invoice.toObject());
+  await Invoice.updateOne(
+    { _id: invoice._id },
+    {
+      $set: {
+        'pdf.generatedAt': new Date()
+      }
+    }
+  );
+
+  await logInvoiceAudit('INVOICE_PDF_GENERATED', invoice, actor);
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename=${invoice.invoiceNumber}.pdf`);
+  return res.status(200).send(buffer);
+}
+
+exports.getMyInvoices = async (req, res, next) => {
+  try {
+    const { page, limit, skip } = parsePagination(req.query);
+    const query = { customerId: req.user.id, type: 'CUSTOMER' };
+    const [data, total] = await Promise.all([
+      Invoice.find(query).sort({ issuedAt: -1 }).skip(skip).limit(limit),
+      Invoice.countDocuments(query)
+    ]);
+    return res.status(200).json({
+      success: true,
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+      data
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+exports.getMyInvoiceById = async (req, res, next) => {
+  try {
+    if (!isObjectId(req.params.invoiceId)) {
+      return res.status(400).json({ success: false, message: 'Invalid invoice id' });
+    }
+    const invoice = await fetchInvoiceForCustomer(req.params.invoiceId, req.user.id);
+    if (!invoice) {
+      return res.status(404).json({ success: false, message: 'Invoice not found' });
+    }
+    return res.status(200).json({ success: true, data: invoice });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+exports.downloadMyInvoicePdf = async (req, res, next) => {
+  try {
+    if (!isObjectId(req.params.invoiceId)) {
+      return res.status(400).json({ success: false, message: 'Invalid invoice id' });
+    }
+    const invoice = await fetchInvoiceForCustomer(req.params.invoiceId, req.user.id);
+    if (!invoice) {
+      return res.status(404).json({ success: false, message: 'Invoice not found' });
+    }
+    return streamInvoicePdf(res, invoice, { id: req.user.id, role: req.user.role });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+exports.getVendorInvoices = async (req, res, next) => {
+  try {
+    const vendorId = await resolveVendorIdForUser(req.user.id);
+    if (!vendorId) {
+      return res.status(404).json({ success: false, message: 'Vendor profile not found' });
+    }
+    const { page, limit, skip } = parsePagination(req.query);
+    const query = { vendorId, type: 'VENDOR' };
+    if (req.query.status) query.status = String(req.query.status).toUpperCase();
+
+    const [data, total] = await Promise.all([
+      Invoice.find(query).sort({ issuedAt: -1 }).skip(skip).limit(limit),
+      Invoice.countDocuments(query)
+    ]);
+    return res.status(200).json({
+      success: true,
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+      data
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+exports.getVendorInvoiceById = async (req, res, next) => {
+  try {
+    if (!isObjectId(req.params.invoiceId)) {
+      return res.status(400).json({ success: false, message: 'Invalid invoice id' });
+    }
+    const invoice = await fetchInvoiceForVendor(req.params.invoiceId, req.user.id);
+    if (!invoice) {
+      return res.status(404).json({ success: false, message: 'Invoice not found' });
+    }
+    return res.status(200).json({ success: true, data: invoice });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+exports.downloadVendorInvoicePdf = async (req, res, next) => {
+  try {
+    if (!isObjectId(req.params.invoiceId)) {
+      return res.status(400).json({ success: false, message: 'Invalid invoice id' });
+    }
+    const invoice = await fetchInvoiceForVendor(req.params.invoiceId, req.user.id);
+    if (!invoice) {
+      return res.status(404).json({ success: false, message: 'Invoice not found' });
+    }
+    return streamInvoicePdf(res, invoice, { id: req.user.id, role: req.user.role });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+exports.getAdminInvoices = async (req, res, next) => {
+  try {
+    const { page, limit, skip } = parsePagination(req.query);
+    const query = buildInvoiceQueryForAdmin(req.query);
+    const [data, total] = await Promise.all([
+      Invoice.find(query).sort({ issuedAt: -1 }).skip(skip).limit(limit),
+      Invoice.countDocuments(query)
+    ]);
+    return res.status(200).json({
+      success: true,
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+      data
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+exports.getAdminInvoiceById = async (req, res, next) => {
+  try {
+    if (!isObjectId(req.params.invoiceId)) {
+      return res.status(400).json({ success: false, message: 'Invalid invoice id' });
+    }
+    const invoice = await Invoice.findById(req.params.invoiceId);
+    if (!invoice) {
+      return res.status(404).json({ success: false, message: 'Invoice not found' });
+    }
+    return res.status(200).json({ success: true, data: invoice });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+exports.regenerateAdminInvoicePdf = async (req, res, next) => {
+  try {
+    if (!isObjectId(req.params.invoiceId)) {
+      return res.status(400).json({ success: false, message: 'Invalid invoice id' });
+    }
+    const invoice = await Invoice.findById(req.params.invoiceId);
+    if (!invoice) {
+      return res.status(404).json({ success: false, message: 'Invoice not found' });
+    }
+    await generateInvoicePdfBuffer(invoice.toObject());
+    await Invoice.updateOne({ _id: invoice._id }, { $set: { 'pdf.generatedAt': new Date() } });
+    await logInvoiceAudit('INVOICE_PDF_REGENERATED', invoice, { id: req.user.id, role: req.user.role });
+    return res.status(200).json({ success: true, message: 'PDF regenerated successfully' });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+exports.voidInvoice = async (req, res, next) => {
+  try {
+    if (!isObjectId(req.params.invoiceId)) {
+      return res.status(400).json({ success: false, message: 'Invalid invoice id' });
+    }
+    const reason = String(req.body.reason || '').trim();
+    if (!reason) {
+      return res.status(400).json({ success: false, message: 'Void reason is required' });
+    }
+
+    const invoice = await Invoice.findById(req.params.invoiceId);
+    if (!invoice) {
+      return res.status(404).json({ success: false, message: 'Invoice not found' });
+    }
+
+    invoice.status = 'VOID';
+    invoice.voidReason = reason;
+    invoice.voidedAt = new Date();
+    invoice.voidedBy = req.user.id;
+    await invoice.save();
+
+    await logInvoiceAudit('INVOICE_VOIDED', invoice, { id: req.user.id, role: req.user.role });
+
+    return res.status(200).json({ success: true, data: invoice });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+// Legacy compatibility route: GET /api/invoices/:orderId
+exports.generateInvoice = async (req, res, next) => {
+  try {
+    const { orderId } = req.params;
+    if (!isObjectId(orderId)) {
+      return res.status(400).json({ success: false, message: 'Invalid order id' });
+    }
+
+    const order = await Order.findById(orderId);
     if (!order) {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    // Check authorization
-    if (
-      req.user.role !== 'admin' &&
-      order.customer.toString() !== req.user.id &&
-      !order.items.some(item => item.vendor && item.vendor.user && item.vendor.user.toString() === req.user.id)
-    ) {
+    const isCustomer = String(order.customerId || order.customer) === String(req.user.id);
+    let isVendor = false;
+    if (!isCustomer && req.user.role === 'vendor') {
+      const vendorId = await resolveVendorIdForUser(req.user.id);
+      isVendor = !!vendorId && (order.items || []).some((item) => String(item.vendorId || item.vendor) === String(vendorId));
+    }
+    if (req.user.role !== 'admin' && !isCustomer && !isVendor) {
       return res.status(403).json({ success: false, message: 'Not authorized to view this invoice' });
     }
 
-    // Create PDF document
-    const doc = new PDFDocument({ margin: 50 });
+    await issueInvoicesForOrder({ orderId: order._id, actorId: req.user.id, force: true });
 
-    // Set response headers
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=invoice-${order.orderNumber}.pdf`);
-
-    // Pipe PDF to response
-    doc.pipe(res);
-
-    // Add NVM Logo/Header
-    doc.fontSize(24).font('Helvetica-Bold').text('NVM MARKETPLACE', 50, 50);
-    doc.fontSize(10).font('Helvetica').text('Ndingoho Vendor Markets', 50, 80);
-    doc.text('South Africa', 50, 95);
-    doc.moveDown();
-
-    // Invoice Title
-    doc.fontSize(20).font('Helvetica-Bold').text('TAX INVOICE', 50, 130);
-    doc.fontSize(10).font('Helvetica').text(`Invoice Number: ${order.orderNumber}`, 50, 160);
-    doc.text(`Date: ${new Date(order.createdAt).toLocaleDateString('en-ZA', { 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
-    })}`, 50, 175);
-    doc.text(`Payment Status: ${order.paymentStatus.toUpperCase()}`, 50, 190);
-
-    // Draw line
-    doc.moveTo(50, 210).lineTo(550, 210).stroke();
-
-    // Customer Details
-    doc.fontSize(12).font('Helvetica-Bold').text('BILL TO:', 50, 230);
-    doc.fontSize(10).font('Helvetica')
-      .text(order.shippingAddress.fullName, 50, 250)
-      .text(order.shippingAddress.street, 50, 265)
-      .text(`${order.shippingAddress.city}, ${order.shippingAddress.state}`, 50, 280)
-      .text(`${order.shippingAddress.zipCode}, ${order.shippingAddress.country}`, 50, 295)
-      .text(`Phone: ${order.shippingAddress.phone}`, 50, 310);
-
-    // Group items by vendor
-    const itemsByVendor = {};
-    order.items.forEach(item => {
-      const vendorId = item.vendor._id.toString();
-      if (!itemsByVendor[vendorId]) {
-        itemsByVendor[vendorId] = {
-          vendor: item.vendor,
-          items: []
-        };
-      }
-      itemsByVendor[vendorId].items.push(item);
-    });
-
-    let yPosition = 350;
-
-    // Iterate through each vendor
-    Object.values(itemsByVendor).forEach((vendorGroup, index) => {
-      const vendor = vendorGroup.vendor;
-      
-      // Vendor Details
-      doc.fontSize(12).font('Helvetica-Bold').text(`VENDOR ${index + 1}:`, 50, yPosition);
-      yPosition += 20;
-      
-      doc.fontSize(10).font('Helvetica')
-        .text(`Store Name: ${vendor.storeName}`, 50, yPosition);
-      yPosition += 15;
-      
-      doc.text(`Email: ${vendor.email}`, 50, yPosition);
-      yPosition += 15;
-      
-      doc.text(`Phone: ${vendor.phone}`, 50, yPosition);
-      yPosition += 15;
-      
-      if (vendor.address) {
-        doc.text(`Address: ${vendor.address.street}, ${vendor.address.city}, ${vendor.address.state}`, 50, yPosition);
-        yPosition += 15;
-      }
-      
-      yPosition += 10;
-
-      // Items Table Header
-      doc.fontSize(10).font('Helvetica-Bold');
-      doc.text('ITEM', 50, yPosition);
-      doc.text('QTY', 300, yPosition);
-      doc.text('PRICE', 370, yPosition);
-      doc.text('TOTAL', 470, yPosition);
-      yPosition += 15;
-      
-      doc.moveTo(50, yPosition).lineTo(550, yPosition).stroke();
-      yPosition += 10;
-
-      // Items
-      doc.font('Helvetica');
-      vendorGroup.items.forEach(item => {
-        if (yPosition > 700) {
-          doc.addPage();
-          yPosition = 50;
-        }
-        
-        doc.text(item.name, 50, yPosition, { width: 230 });
-        doc.text(item.quantity.toString(), 300, yPosition);
-        doc.text(`R ${item.price.toFixed(2)}`, 370, yPosition);
-        doc.text(`R ${item.subtotal.toFixed(2)}`, 470, yPosition);
-        yPosition += 20;
-      });
-
-      yPosition += 10;
-
-      // Banking Details for this vendor
-      if (vendor.bankDetails && (order.paymentMethod === 'eft' || order.paymentMethod === 'bank-transfer')) {
-        doc.fontSize(11).font('Helvetica-Bold').text('PAYMENT DETAILS (EFT):', 50, yPosition);
-        yPosition += 20;
-        
-        doc.fontSize(10).font('Helvetica')
-          .text(`Bank Name: ${vendor.bankDetails.bankName}`, 50, yPosition);
-        yPosition += 15;
-        
-        doc.text(`Account Holder: ${vendor.bankDetails.accountHolderName}`, 50, yPosition);
-        yPosition += 15;
-        
-        doc.text(`Account Number: ${vendor.bankDetails.accountNumber}`, 50, yPosition);
-        yPosition += 15;
-        
-        doc.text(`Branch Code: ${vendor.bankDetails.branchCode}`, 50, yPosition);
-        yPosition += 15;
-        
-        doc.text(`Account Type: ${vendor.bankDetails.accountType.toUpperCase()}`, 50, yPosition);
-        yPosition += 15;
-        
-        if (vendor.bankDetails.swiftCode) {
-          doc.text(`Swift Code: ${vendor.bankDetails.swiftCode}`, 50, yPosition);
-          yPosition += 15;
-        }
-        
-        yPosition += 10;
-        doc.fontSize(9).font('Helvetica-Oblique')
-          .text('Please use order number as reference when making payment', 50, yPosition);
-        yPosition += 25;
-      }
-
-      doc.moveTo(50, yPosition).lineTo(550, yPosition).stroke();
-      yPosition += 20;
-    });
-
-    // Order Summary
-    if (yPosition > 650) {
-      doc.addPage();
-      yPosition = 50;
+    let invoice;
+    if (req.user.role === 'vendor' && !isCustomer) {
+      const vendorId = await resolveVendorIdForUser(req.user.id);
+      invoice = await Invoice.findOne({ orderId, vendorId, type: 'VENDOR' });
+    } else {
+      invoice = await Invoice.findOne({ orderId, type: 'CUSTOMER' });
     }
-
-    doc.fontSize(12).font('Helvetica-Bold').text('ORDER SUMMARY', 350, yPosition);
-    yPosition += 20;
-
-    doc.fontSize(10).font('Helvetica');
-    doc.text('Subtotal:', 350, yPosition);
-    doc.text(`R ${order.subtotal.toFixed(2)}`, 470, yPosition);
-    yPosition += 15;
-
-    if (order.shippingCost > 0) {
-      doc.text('Shipping:', 350, yPosition);
-      doc.text(`R ${order.shippingCost.toFixed(2)}`, 470, yPosition);
-      yPosition += 15;
+    if (!invoice) {
+      return res.status(404).json({ success: false, message: 'Invoice not found' });
     }
-
-    if (order.tax > 0) {
-      doc.text('Tax (VAT):', 350, yPosition);
-      doc.text(`R ${order.tax.toFixed(2)}`, 470, yPosition);
-      yPosition += 15;
-    }
-
-    if (order.discount > 0) {
-      doc.text('Discount:', 350, yPosition);
-      doc.text(`-R ${order.discount.toFixed(2)}`, 470, yPosition);
-      yPosition += 15;
-    }
-
-    doc.moveTo(350, yPosition).lineTo(550, yPosition).stroke();
-    yPosition += 10;
-
-    doc.fontSize(12).font('Helvetica-Bold');
-    doc.text('TOTAL:', 350, yPosition);
-    doc.text(`R ${order.total.toFixed(2)}`, 470, yPosition);
-
-    // Footer
-    doc.fontSize(8).font('Helvetica').text(
-      'Thank you for shopping with NVM Marketplace!',
-      50,
-      750,
-      { align: 'center', width: 500 }
-    );
-    
-    doc.text(
-      'For any queries, please contact the vendor directly or visit www.nvmmarketplace.co.za',
-      50,
-      765,
-      { align: 'center', width: 500 }
-    );
-
-    // Finalize PDF
-    doc.end();
+    return streamInvoicePdf(res, invoice, { id: req.user.id, role: req.user.role });
   } catch (error) {
-    console.error('Invoice generation error:', error);
-    next(error);
+    return next(error);
   }
-  */
 };
 
-// @desc    Get invoice data (JSON format)
-// @route   GET /api/invoices/:orderId/data
-// @access  Private (Customer/Vendor/Admin)
+// Legacy compatibility route: GET /api/invoices/:orderId/data
 exports.getInvoiceData = async (req, res, next) => {
   try {
-    const order = await Order.findById(req.params.orderId)
-      .populate('customer', 'name email phone')
-      .populate('items.product', 'name')
-      .populate('items.vendor', 'storeName email phone address bankDetails');
-
+    const { orderId } = req.params;
+    if (!isObjectId(orderId)) {
+      return res.status(400).json({ success: false, message: 'Invalid order id' });
+    }
+    const order = await Order.findById(orderId);
     if (!order) {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    // Check authorization
-    if (
-      req.user.role !== 'admin' &&
-      order.customer._id.toString() !== req.user.id &&
-      !order.items.some(item => {
-        const vendor = item.vendor;
-        return vendor && vendor.user && vendor.user.toString() === req.user.id;
-      })
-    ) {
-      return res.status(403).json({ success: false, message: 'Not authorized to view this invoice' });
+    const isCustomer = String(order.customerId || order.customer) === String(req.user.id);
+    if (req.user.role !== 'admin' && !isCustomer) {
+      const vendorId = await resolveVendorIdForUser(req.user.id);
+      const isVendor = !!vendorId && (order.items || []).some((item) => String(item.vendorId || item.vendor) === String(vendorId));
+      if (!isVendor) {
+        return res.status(403).json({ success: false, message: 'Not authorized to view invoice data' });
+      }
     }
 
-    // Group items by vendor
-    const itemsByVendor = {};
-    order.items.forEach(item => {
-      const vendorId = item.vendor._id.toString();
-      if (!itemsByVendor[vendorId]) {
-        itemsByVendor[vendorId] = {
-          vendor: {
-            id: item.vendor._id,
-            storeName: item.vendor.storeName,
-            email: item.vendor.email,
-            phone: item.vendor.phone,
-            address: item.vendor.address,
-            bankDetails: order.paymentMethod === 'eft' || order.paymentMethod === 'bank-transfer' 
-              ? item.vendor.bankDetails 
-              : null
-          },
-          items: []
-        };
-      }
-      itemsByVendor[vendorId].items.push({
-        id: item._id,
-        productId: item.product._id,
-        name: item.name,
-        image: item.image,
-        price: item.price,
-        quantity: item.quantity,
-        subtotal: item.subtotal
-      });
-    });
+    await issueInvoicesForOrder({ orderId: order._id, actorId: req.user.id, force: true });
 
-    const invoiceData = {
-      orderNumber: order.orderNumber,
-      date: order.createdAt,
-      customer: {
-        name: order.customer.name,
-        email: order.customer.email,
-        phone: order.customer.phone || order.shippingAddress.phone
-      },
-      shippingAddress: order.shippingAddress,
-      vendors: Object.values(itemsByVendor),
-      subtotal: order.subtotal,
-      shippingCost: order.shippingCost,
-      tax: order.tax,
-      discount: order.discount,
-      total: order.total,
-      paymentMethod: order.paymentMethod,
-      paymentStatus: order.paymentStatus,
-      fulfillmentMethod: order.fulfillmentMethod
-    };
-
-    res.status(200).json({
+    const invoices = await Invoice.find({ orderId }).sort({ type: 1, issuedAt: -1 });
+    return res.status(200).json({
       success: true,
-      data: invoiceData
+      data: invoices
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
-

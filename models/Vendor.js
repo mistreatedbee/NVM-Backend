@@ -110,6 +110,29 @@ const vendorSchema = new mongoose.Schema({
   
   // Banking Information (for EFT payments) - Optional but recommended
   bankDetails: {
+    bankName: {
+      type: String
+    },
+    accountHolder: {
+      type: String
+    },
+    accountNumber: {
+      type: String
+    },
+    branchCode: {
+      type: String
+    },
+    accountType: {
+      type: String,
+      enum: ['savings', 'current', 'business'],
+      default: 'current'
+    },
+    payoutEmail: {
+      type: String
+    },
+    payoutReference: {
+      type: String
+    },
     accountHolderName: {
       type: String
       // Made optional - vendors can add this later
@@ -125,11 +148,6 @@ const vendorSchema = new mongoose.Schema({
     branchCode: {
       type: String
       // Made optional - vendors can add this later
-    },
-    accountType: {
-      type: String,
-      enum: ['savings', 'current', 'business'],
-      default: 'current'
     },
     swiftCode: String // For international payments
   },
@@ -383,6 +401,15 @@ vendorSchema.pre('save', function(next) {
       .replace(/[^a-z0-9-]+/g, '-')
       .replace(/-+/g, '-')
       .replace(/^-+|-+$/g, '');
+  }
+
+  if (this.bankDetails) {
+    if (!this.bankDetails.accountHolder && this.bankDetails.accountHolderName) {
+      this.bankDetails.accountHolder = this.bankDetails.accountHolderName;
+    }
+    if (!this.bankDetails.accountHolderName && this.bankDetails.accountHolder) {
+      this.bankDetails.accountHolderName = this.bankDetails.accountHolder;
+    }
   }
   next();
 });

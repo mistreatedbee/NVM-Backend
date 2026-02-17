@@ -9,6 +9,7 @@ const OrderStatusHistory = require('../models/OrderStatusHistory');
 const User = require('../models/User');
 const { notifyUser } = require('../services/notificationService');
 const { buildAppUrl } = require('../utils/appUrl');
+const { issueInvoicesForOrder } = require('../services/invoiceService');
 
 // @desc    Create new order
 // @route   POST /api/orders
@@ -107,6 +108,10 @@ exports.createOrder = async (req, res, next) => {
       },
       customerNotes
     });
+
+    if (paymentMethod === 'cash-on-delivery') {
+      await issueInvoicesForOrder({ orderId: order._id, actorId: req.user.id, force: true });
+    }
 
     await OrderStatusHistory.create({
       orderId: order._id,

@@ -278,7 +278,12 @@ const orderSchema = new mongoose.Schema({
   // Cancellation/Refund
   cancellationReason: String,
   refundAmount: Number,
-  refundedAt: Date
+  refundedAt: Date,
+  invoiceIds: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Invoice'
+  }],
+  invoicesGeneratedAt: Date
 }, {
   timestamps: true
 });

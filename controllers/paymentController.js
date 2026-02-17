@@ -4,6 +4,7 @@ const Transaction = require('../models/Transaction');
 const User = require('../models/User');
 const { notifyUser } = require('../services/notificationService');
 const { buildAppUrl } = require('../utils/appUrl');
+const { issueInvoicesForOrder } = require('../services/invoiceService');
 
 // @desc    Create payment intent (Stripe)
 // @route   POST /api/payments/create-intent
@@ -59,6 +60,7 @@ exports.confirmPayment = async (req, res, next) => {
       order.status = 'confirmed';
       order.confirmedAt = Date.now();
       await order.save();
+      await issueInvoicesForOrder({ orderId: order._id, actorId: req.user.id });
 
       const customer = await User.findById(order.customer).select('name email role');
       if (customer) {

@@ -1194,7 +1194,8 @@ exports.upsertVendorProfile = async (req, res, next) => {
       'privacy',
       'location',
       'address',
-      'policies'
+      'policies',
+      'bankDetails'
     ];
 
     fields.forEach((field) => {

@@ -1,11 +1,20 @@
 const express = require('express');
 const router = express.Router();
-const { generateInvoice, getInvoiceData } = require('../controllers/invoiceController');
 const { authenticate } = require('../middleware/auth');
-const { validateId, validate } = require('../middleware/validator');
+const {
+  getMyInvoices,
+  getMyInvoiceById,
+  downloadMyInvoicePdf,
+  generateInvoice,
+  getInvoiceData
+} = require('../controllers/invoiceController');
 
-router.get('/:orderId', authenticate, validateId, validate, generateInvoice);
-router.get('/:orderId/data', authenticate, validateId, validate, getInvoiceData);
+router.get('/my', authenticate, getMyInvoices);
+router.get('/my/:invoiceId', authenticate, getMyInvoiceById);
+router.get('/my/:invoiceId/pdf', authenticate, downloadMyInvoicePdf);
+
+// Legacy compatibility routes by order id
+router.get('/:orderId/data', authenticate, getInvoiceData);
+router.get('/:orderId', authenticate, generateInvoice);
 
 module.exports = router;
-

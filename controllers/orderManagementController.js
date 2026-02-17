@@ -5,6 +5,7 @@ const User = require('../models/User');
 const cloudinary = require('../utils/cloudinary');
 const { notifyUser } = require('../services/notificationService');
 const { buildAppUrl } = require('../utils/appUrl');
+const { issueInvoicesForOrder } = require('../services/invoiceService');
 
 // @desc    Upload payment proof
 // @route   POST /api/orders/:orderId/payment-proof
@@ -115,6 +116,7 @@ exports.confirmPayment = async (req, res, next) => {
     order.confirmedAt = new Date();
 
     await order.save();
+    await issueInvoicesForOrder({ orderId: order._id, actorId: req.user.id });
 
     const customer = await User.findById(order.customer).select('name email role');
     if (customer) {

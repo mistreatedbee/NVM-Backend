@@ -374,6 +374,33 @@ exports.vendorProfileValidation = [
     .optional()
     .trim()
     .isLength({ max: 100 }).withMessage('City cannot exceed 100 characters'),
+  body('bankDetails.bankName')
+    .optional()
+    .trim()
+    .isLength({ max: 120 }).withMessage('Bank name cannot exceed 120 characters'),
+  body('bankDetails.accountHolder')
+    .optional()
+    .trim()
+    .isLength({ max: 120 }).withMessage('Account holder cannot exceed 120 characters'),
+  body('bankDetails.accountNumber')
+    .optional()
+    .trim()
+    .isLength({ max: 40 }).withMessage('Account number cannot exceed 40 characters'),
+  body('bankDetails.branchCode')
+    .optional()
+    .trim()
+    .isLength({ max: 20 }).withMessage('Branch code cannot exceed 20 characters'),
+  body('bankDetails.accountType')
+    .optional()
+    .isIn(['savings', 'current', 'business']).withMessage('Invalid account type'),
+  body('bankDetails.payoutEmail')
+    .optional()
+    .trim()
+    .isEmail().withMessage('Invalid payout email'),
+  body('bankDetails.payoutReference')
+    .optional()
+    .trim()
+    .isLength({ max: 120 }).withMessage('Payout reference cannot exceed 120 characters'),
   body('privacy.showPhone')
     .optional()
     .isBoolean().withMessage('showPhone must be true/false'),
