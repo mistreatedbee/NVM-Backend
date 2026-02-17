@@ -99,16 +99,16 @@ exports.getVendorAnalytics = async (req, res, next) => {
 
     // Products summary
     const productQuery = { vendor: vendor._id, isActive: true };
-    const [productsTotal, productsActive, productsOutOfStock, productsInactive, productsDraft] = await Promise.all([
+    const [productsTotal, productsPublished, productsPending, productsRejected, productsDraft] = await Promise.all([
       Product.countDocuments(productQuery),
-      Product.countDocuments({ ...productQuery, status: 'active' }),
-      Product.countDocuments({ ...productQuery, status: 'out-of-stock' }),
-      Product.countDocuments({ ...productQuery, status: 'inactive' }),
-      Product.countDocuments({ ...productQuery, status: 'draft' })
+      Product.countDocuments({ ...productQuery, status: 'PUBLISHED' }),
+      Product.countDocuments({ ...productQuery, status: 'PENDING' }),
+      Product.countDocuments({ ...productQuery, status: 'REJECTED' }),
+      Product.countDocuments({ ...productQuery, status: 'DRAFT' })
     ]);
 
     // Top products
-    const topProducts = await Product.find({ ...productQuery, status: { $in: ['active', 'out-of-stock'] } })
+    const topProducts = await Product.find({ ...productQuery, status: 'PUBLISHED' })
       .select('name images price totalSales')
       .sort('-totalSales -createdAt')
       .limit(5);
@@ -144,9 +144,9 @@ exports.getVendorAnalytics = async (req, res, next) => {
         },
         products: {
           total: productsTotal,
-          active: productsActive,
-          outOfStock: productsOutOfStock,
-          inactive: productsInactive,
+          published: productsPublished,
+          pending: productsPending,
+          rejected: productsRejected,
           draft: productsDraft
         },
         reviews: {

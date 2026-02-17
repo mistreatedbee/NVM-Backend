@@ -63,6 +63,7 @@ async function seedUsersAndVendor() {
       zipCode: '8001'
     },
     status: 'approved',
+    vendorStatus: 'ACTIVE',
     accountStatus: 'active',
     isActive: true
   });
@@ -194,9 +195,10 @@ test('vendor admin flows: status update, document review, compliance, activity l
 });
 
 test('product moderation/report endpoints: report, admin queue, moderation, audit', async () => {
-  const { admin, customer, vendor } = await seedUsersAndVendor();
+  const { admin, customer, vendor, vendorUser } = await seedUsersAndVendor();
   const adminAuth = authHeaderFor(admin._id);
   const customerAuth = authHeaderFor(customer._id);
+  const vendorAuth = authHeaderFor(vendorUser._id);
 
   const category = await Category.create({
     name: 'Electronics',
@@ -205,6 +207,7 @@ test('product moderation/report endpoints: report, admin queue, moderation, audi
 
   const product = await Product.create({
     vendor: vendor._id,
+    vendorId: vendorUser._id,
     name: 'Wireless Mouse',
     description: 'High precision wireless mouse',
     productType: 'physical',
@@ -212,57 +215,47 @@ test('product moderation/report endpoints: report, admin queue, moderation, audi
     price: 199.99,
     stock: 20,
     images: [{ url: 'https://example.com/product/mouse.jpg' }],
-    status: 'active',
-    isActive: true,
-    isApproved: false,
-    moderationStatus: 'pending'
+    status: 'DRAFT',
+    isActive: true
   });
+
+  const submitRes = await request(app)
+    .post(`/api/vendor/products/${product._id}/submit`)
+    .set('Authorization', vendorAuth)
+    .expect(200);
+  assert.equal(submitRes.body.success, true);
+  assert.equal(submitRes.body.data.status, 'PENDING');
+
+  const queueRes = await request(app)
+    .get('/api/admin/products?status=PENDING')
+    .set('Authorization', adminAuth)
+    .expect(200);
+  assert.equal(queueRes.body.success, true);
+  assert.equal(queueRes.body.total >= 1, true);
+
+  const approveRes = await request(app)
+    .patch(`/api/admin/products/${product._id}/approve`)
+    .set('Authorization', adminAuth)
+    .expect(200);
+
+  assert.equal(approveRes.body.success, true);
+  assert.equal(approveRes.body.data.status, 'PUBLISHED');
+  assert.equal(approveRes.body.data.isActive, true);
 
   const reportRes = await request(app)
     .post(`/api/products/${product._id}/report`)
     .set('Authorization', customerAuth)
     .send({ reason: 'misleading', details: 'Images do not match product details.' })
     .expect(201);
-
   assert.equal(reportRes.body.success, true);
   assert.equal(reportRes.body.data.reportCount, 1);
 
-  const reportedQueueRes = await request(app)
-    .get('/api/products/admin/reported?reportStatus=open')
+  const historyRes = await request(app)
+    .get(`/api/products/${product._id}/history?page=1&limit=5`)
     .set('Authorization', adminAuth)
     .expect(200);
 
-  assert.equal(reportedQueueRes.body.success, true);
-  assert.equal(reportedQueueRes.body.total >= 1, true);
-
-  const resolveReportsRes = await request(app)
-    .put(`/api/products/${product._id}/moderate`)
-    .set('Authorization', adminAuth)
-    .send({ action: 'resolve-reports', reason: 'Reviewed and handled' })
-    .expect(200);
-
-  assert.equal(resolveReportsRes.body.success, true);
-  assert.equal(resolveReportsRes.body.data.reportCount, 0);
-
-  const approveRes = await request(app)
-    .put(`/api/products/${product._id}/moderate`)
-    .set('Authorization', adminAuth)
-    .send({ action: 'approve', reason: 'Complies with policy' })
-    .expect(200);
-
-  assert.equal(approveRes.body.success, true);
-  assert.equal(approveRes.body.data.moderationStatus, 'approved');
-  assert.equal(approveRes.body.data.isApproved, true);
-
-  const auditRes = await request(app)
-    .get(`/api/products/${product._id}/audit?reportsPage=1&reportsLimit=1&activityPage=1&activityLimit=1&historyPage=1&historyLimit=1`)
-    .set('Authorization', adminAuth)
-    .expect(200);
-
-  assert.equal(auditRes.body.success, true);
-  assert.equal(Array.isArray(auditRes.body.data.moderationHistory), true);
-  assert.equal(Array.isArray(auditRes.body.data.activityLogs), true);
-  assert.equal(auditRes.body.data.moderationHistory.length >= 1, true);
-  assert.equal(auditRes.body.data.pagination.reports.page, 1);
-  assert.equal(auditRes.body.data.pagination.activityLogs.limit, 1);
+  assert.equal(historyRes.body.success, true);
+  assert.equal(Array.isArray(historyRes.body.data), true);
+  assert.equal(historyRes.body.data.length >= 2, true);
 });

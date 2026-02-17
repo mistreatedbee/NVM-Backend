@@ -37,7 +37,7 @@ exports.createOrder = async (req, res, next) => {
         });
       }
 
-      if (product.status !== 'active') {
+      if (product.status !== 'PUBLISHED' || !product.isActive) {
         return res.status(400).json({
           success: false,
           message: `Product ${product.name} is not available`

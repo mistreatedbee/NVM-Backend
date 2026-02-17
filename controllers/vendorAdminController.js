@@ -160,7 +160,7 @@ async function getVendorMetrics(vendorId) {
       $match: {
         vendor: objectId,
         isActive: true,
-        isApproved: true
+        status: 'PUBLISHED'
       }
     },
     {

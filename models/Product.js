@@ -6,6 +6,11 @@ const productSchema = new mongoose.Schema({
     ref: 'Vendor',
     required: true
   },
+  vendorId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
   name: {
     type: String,
     required: [true, 'Please provide a product name'],
@@ -163,49 +168,35 @@ const productSchema = new mongoose.Schema({
   // Status
   status: {
     type: String,
-    enum: ['draft', 'active', 'inactive', 'out-of-stock'],
-    // Vendors expect newly created products to be visible immediately.
-    // If stock is 0 and inventory is tracked, the pre-save hook will mark it as 'out-of-stock'.
-    default: 'active'
+    enum: ['DRAFT', 'PENDING', 'PUBLISHED', 'REJECTED'],
+    default: 'DRAFT'
   },
   featured: {
     type: Boolean,
     default: false
   },
-  
-  // Moderation
-  isApproved: {
-    type: Boolean,
-    default: false
-  },
-  moderatedBy: {
+
+  submittedForReviewAt: Date,
+  publishedAt: Date,
+  publishedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
-  moderationReason: String,
-  moderatedAt: Date,
-  moderationStatus: {
-    type: String,
-    enum: ['pending', 'approved', 'rejected'],
-    default: 'pending'
+  rejectedAt: Date,
+  rejectedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
   },
-  moderationHistory: [{
-    action: {
-      type: String,
-      enum: ['submitted', 'approved', 'rejected', 'resubmitted'],
-      required: true
-    },
-    reason: String,
-    performedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    },
-    performedByRole: String,
-    createdAt: {
-      type: Date,
-      default: Date.now
-    }
-  }],
+  rejectionReason: {
+    type: String,
+    maxlength: [500, 'Rejection reason cannot be more than 500 characters']
+  },
+  lastEditedAt: Date,
+  lastEditedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+
   reports: [{
     reporter: {
       type: mongoose.Schema.Types.ObjectId,
@@ -268,13 +259,15 @@ const productSchema = new mongoose.Schema({
 
 // Indexes
 productSchema.index({ vendor: 1 });
+productSchema.index({ vendorId: 1 });
 productSchema.index({ category: 1 });
 productSchema.index({ status: 1 });
-productSchema.index({ moderationStatus: 1 });
+productSchema.index({ isActive: 1 });
 productSchema.index({ price: 1 });
 productSchema.index({ rating: -1 });
 productSchema.index({ totalSales: -1 });
 productSchema.index({ createdAt: -1 });
+productSchema.index({ publishedAt: -1 });
 productSchema.index({ reportCount: -1 });
 productSchema.index({ 'reports.status': 1 });
 productSchema.index({ name: 'text', description: 'text', tags: 'text' });
@@ -286,14 +279,6 @@ productSchema.pre('save', function(next) {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '') + '-' + Date.now();
-  }
-  next();
-});
-
-// Update status based on stock
-productSchema.pre('save', function(next) {
-  if (this.trackInventory && this.stock === 0) {
-    this.status = 'out-of-stock';
   }
   next();
 });

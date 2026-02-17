@@ -62,6 +62,8 @@ const emailRoutes = require('./routes/emails');
 const debugRoutes = require('./routes/debug');
 const adminVendorManagementRoutes = require('./routes/adminVendorManagement');
 const vendorDocumentsRoutes = require('./routes/vendorDocuments');
+const vendorProductsRoutes = require('./routes/vendorProducts');
+const adminProductsRoutes = require('./routes/adminProducts');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -75,7 +77,9 @@ app.use('/api/chats', chatRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/admin/chats', adminChatRoutes);
 app.use('/api/admin', adminVendorManagementRoutes);
+app.use('/api/admin', adminProductsRoutes);
 app.use('/api/vendor', vendorDocumentsRoutes);
+app.use('/api/vendor', vendorProductsRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);

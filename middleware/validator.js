@@ -323,6 +323,11 @@ exports.validateDocumentId = [
     .isMongoId().withMessage('Invalid document ID format')
 ];
 
+exports.validateProductId = [
+  param('productId')
+    .isMongoId().withMessage('Invalid product ID format')
+];
+
 // Pagination validation
 exports.paginationValidation = [
   query('page')

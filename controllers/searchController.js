@@ -146,7 +146,7 @@ exports.generateRecommendations = async (req, res, next) => {
     for (const [category, count] of Object.entries(categoryInterests)) {
       const products = await Product.find({
         category,
-        status: 'active',
+        status: 'PUBLISHED',
         isActive: true
       })
         .sort('-rating -totalSales')
@@ -164,7 +164,7 @@ exports.generateRecommendations = async (req, res, next) => {
     
     // Trending products
     const trending = await Product.find({
-      status: 'active',
+      status: 'PUBLISHED',
       isActive: true,
       featured: true
     })

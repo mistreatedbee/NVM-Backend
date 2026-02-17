@@ -18,7 +18,7 @@ const auditLogSchema = new mongoose.Schema({
   },
   entityType: {
     type: String,
-    enum: ['Conversation', 'Message', 'SupportTicket', 'Notification', 'Vendor', 'User', 'Order', 'System', 'Document'],
+    enum: ['Conversation', 'Message', 'SupportTicket', 'Notification', 'Vendor', 'User', 'Order', 'System', 'Document', 'Product'],
     default: 'System'
   },
   entityId: {
@@ -43,13 +43,23 @@ const auditLogSchema = new mongoose.Schema({
       'DOC_REJECT',
       'VENDOR_VERIFY',
       'VENDOR_UNVERIFY',
-      'ADMIN_EDIT_VENDOR'
+      'ADMIN_EDIT_VENDOR',
+      'PRODUCT_APPROVE',
+      'PRODUCT_REJECT',
+      'PRODUCT_UNPUBLISH',
+      'PRODUCT_PUBLISH',
+      'PRODUCT_FLAG'
     ],
     default: null
   },
   targetVendorId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Vendor',
+    default: null
+  },
+  targetProductId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Product',
     default: null
   },
   metadata: mongoose.Schema.Types.Mixed
@@ -60,6 +70,7 @@ const auditLogSchema = new mongoose.Schema({
 auditLogSchema.index({ entityType: 1, entityId: 1, createdAt: -1 });
 auditLogSchema.index({ action: 1, createdAt: -1 });
 auditLogSchema.index({ targetVendorId: 1, createdAt: -1 });
+auditLogSchema.index({ targetProductId: 1, createdAt: -1 });
 auditLogSchema.index({ actorAdminId: 1, createdAt: -1 });
 auditLogSchema.index({ actionType: 1, createdAt: -1 });
 
