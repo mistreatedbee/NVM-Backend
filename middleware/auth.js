@@ -96,6 +96,28 @@ exports.isCustomer = (req, res, next) => {
   }
 };
 
+exports.optionalAuthenticate = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return next();
+    }
+
+    const token = authHeader.substring(7);
+    if (!token) return next();
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key-change-in-production');
+    const user = await User.findById(decoded.id).select('-password');
+    if (user && !user.isBanned) {
+      req.user = user;
+    }
+
+    return next();
+  } catch (error) {
+    return next();
+  }
+};
+
 exports.requireVerifiedEmail = (req, res, next) => {
   if (req.user?.isVerified) {
     return next();

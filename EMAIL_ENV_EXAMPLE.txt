@@ -21,6 +21,7 @@ API_MCP_KEY=
 CLOUDINARY_CLOUD_NAME=
 CLOUDINARY_API_KEY=
 CLOUDINARY_API_SECRET=
+KNOWLEDGE_RESOURCE_UPLOAD_FOLDER=nvm/knowledge/resources
 
 # Optional toggles for vendor management notifications/hooks
 VENDOR_ADMIN_EVENTS_EMAIL_ENABLED=true
