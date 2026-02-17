@@ -36,6 +36,7 @@ router.post('/verify-email', verifyEmail);
 router.get('/verify-email/:token', verifyEmail);
 router.post('/resend-verification', resendVerificationLimiter, resendVerification);
 router.post('/forgot-password', forgotPasswordLimiter, forgotPassword);
+router.post('/reset-password', resetPassword);
 router.put('/reset-password/:token', resetPassword);
 router.put('/profile', authenticate, updateProfile);
 

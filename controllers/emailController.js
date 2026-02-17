@@ -1,5 +1,6 @@
 const { sendTemplate } = require('../services/emailService');
 const { listTemplates } = require('../emails/templates');
+const { buildAppUrl } = require('../utils/appUrl');
 
 function randomOrderId() {
   return `NVM-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -25,7 +26,7 @@ exports.sendTestTemplate = async (req, res, next) => {
       userName: variables.userName || 'Test User',
       vendorName: variables.vendorName || 'Test Vendor',
       orderId: variables.orderId || randomOrderId(),
-      actionUrl: variables.actionUrl || `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || 'http://localhost:5173'}/orders`,
+      actionUrl: variables.actionUrl || buildAppUrl('/orders'),
       supportEmail: variables.supportEmail || process.env.SUPPORT_EMAIL || 'support@nvm.local',
       ...variables
     }, {
@@ -52,7 +53,7 @@ exports.sendQuickVerificationTest = async (req, res, next) => {
 
     const result = await sendTemplate('email_verification', to, {
       userName: 'Verification Tester',
-      actionUrl: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || 'http://localhost:5173'}/verify-email?token=test-token`
+      actionUrl: buildAppUrl('/verify-email?token=test-token')
     }, {
       event: 'email.test.verification',
       initiatedBy: req.user?.id || null

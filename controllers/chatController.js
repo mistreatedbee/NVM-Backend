@@ -9,6 +9,7 @@ const AuditLog = require('../models/AuditLog');
 const { botReply } = require('../utils/chatbot');
 const { getIO } = require('../socket');
 const { notifyAdmins } = require('../services/notificationService');
+const { buildAppUrl } = require('../utils/appUrl');
 
 const URGENT_KEYWORDS = ['payment issue', 'fraud', 'dispute', 'chargeback', 'scam'];
 const AUTO_ESCALATE_AFTER_ATTEMPTS = 3;
@@ -113,10 +114,10 @@ async function createAdminNotifications(title, message, data = {}) {
     message,
     linkUrl: '/admin/chats',
     metadata: data,
-    emailTemplate: 'admin_escalation',
+    emailTemplate: 'chatbot_escalation_admin',
     emailContext: {
       orderId: data.orderId || null,
-      actionLinks: [{ label: 'Open escalations', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/admin/chats` }]
+      actionLinks: [{ label: 'Open escalations', url: buildAppUrl('/admin/chats') }]
     }
   });
 }

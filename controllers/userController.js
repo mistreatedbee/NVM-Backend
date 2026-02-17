@@ -2,6 +2,7 @@ const User = require('../models/User');
 const Vendor = require('../models/Vendor');
 const AuditLog = require('../models/AuditLog');
 const { notifyUser } = require('../services/notificationService');
+const { buildAppUrl } = require('../utils/appUrl');
 
 // @desc    Get all users
 // @route   GET /api/users
@@ -65,7 +66,11 @@ exports.ban = async (req, res, next) => {
       linkUrl: '/login',
       metadata: { event: 'account.banned' },
       emailTemplate: 'account_banned',
-      emailContext: { status: 'banned', reason: req.body?.reason || 'Administrative action' },
+      emailContext: {
+        status: 'banned',
+        reason: req.body?.reason || 'Administrative action',
+        actionUrl: buildAppUrl('/support')
+      },
       actor: {
         actorId: req.user.id,
         actorRole: 'Admin',
@@ -110,8 +115,8 @@ exports.unban = async (req, res, next) => {
       message: 'Your account access has been restored.',
       linkUrl: '/login',
       metadata: { event: 'account.unbanned' },
-      emailTemplate: 'account_reinstated',
-      emailContext: { status: 'active' },
+      emailTemplate: 'account_unbanned',
+      emailContext: { status: 'active', actionUrl: buildAppUrl('/login') },
       actor: {
         actorId: req.user.id,
         actorRole: 'Admin',

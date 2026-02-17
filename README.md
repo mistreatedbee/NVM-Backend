@@ -49,6 +49,26 @@ The server will start on `http://localhost:5001`
 - `PUT /api/vendors/:id/reject` - Reject vendor (Admin)
 - `GET /api/vendors/:id/analytics` - Get vendor analytics
 
+### Admin Vendor Management (New)
+- `GET /api/admin/vendors?status=&verified=&q=&page=&limit=` - List vendors with filters + pagination (Admin)
+- `GET /api/admin/vendors/:vendorId` - Vendor details with documents + metrics (Admin)
+- `PATCH /api/admin/vendors/:vendorId/approve` - Approve vendor (Admin)
+- `PATCH /api/admin/vendors/:vendorId/reject` - Reject vendor with reason (Admin)
+- `PATCH /api/admin/vendors/:vendorId/suspend` - Suspend vendor with reason (Admin)
+- `PATCH /api/admin/vendors/:vendorId/unsuspend` - Remove suspension (Admin)
+- `PATCH /api/admin/vendors/:vendorId/profile` - Edit vendor profile incl. phone (Admin)
+- `GET /api/admin/vendors/:vendorId/documents` - List vendor documents (Admin)
+- `PATCH /api/admin/documents/:docId/approve` - Approve vendor document (Admin)
+- `PATCH /api/admin/documents/:docId/reject` - Reject vendor document (Admin)
+- `GET /api/admin/vendors/:vendorId/metrics` - Vendor metrics (orders/sales/reviews/rating) (Admin)
+- `GET /api/admin/audit-logs?vendorId=&page=&limit=` - Audit logs (Admin)
+
+### Vendor Verification (New)
+- `POST /api/vendor/documents` - Upload vendor document (`multipart/form-data`, fields: `docType`, `file`) (Vendor)
+- `GET /api/vendor/documents` - List own uploaded documents (Vendor)
+- `DELETE /api/vendor/documents/:docId` - Delete own unapproved document (Vendor)
+- `GET /api/vendor/metrics` - Vendor metrics (orders/sales/reviews/rating) (Vendor)
+
 ### Products
 - `POST /api/products` - Create product (Vendor)
 - `GET /api/products` - Get all products

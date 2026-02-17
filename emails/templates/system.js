@@ -8,6 +8,23 @@ const {
 
 const systemTemplates = [
   buildTemplate({
+    key: 'chatbot_escalation_admin',
+    subject: 'Admin alert: Chatbot escalation',
+    requiredVariables: [],
+    compose: (vars) => {
+      const html = baseLayout({
+        title: 'Chat escalation requires admin',
+        preheader: 'A conversation has been escalated to support.',
+        greeting: 'Hello Admin,',
+        paragraphs: [vars.details || 'A chatbot conversation could not be resolved and needs manual support.'],
+        cta: { label: actionLabel(vars, 'Open escalations'), url: vars.actionUrl || `${vars.appUrl}/admin/chats` },
+        supportEmail: vars.supportEmail,
+        footerLinks: [{ label: 'Admin chats', url: `${vars.appUrl}/admin/chats` }]
+      });
+      return { html, text: fallbackText({ title: 'Chat escalation requires admin', lines: [vars.details || 'A chatbot escalation requires attention.'], actionUrl: vars.actionUrl || `${vars.appUrl}/admin/chats` }) };
+    }
+  }),
+  buildTemplate({
     key: 'new_vendor_needs_approval',
     subject: 'Admin alert: Vendor pending approval',
     requiredVariables: ['vendorName'],

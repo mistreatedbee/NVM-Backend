@@ -1,24 +1,27 @@
 # Backend email environment template (do not commit real secrets)
-EMAIL_PROVIDER=SMTP
+EMAIL_PROVIDER=BREVO_API
+BREVO_API_KEY=
+
+# Optional SMTP fallback
 SMTP_HOST=smtp-relay.brevo.com
 SMTP_PORT=587
 SMTP_USER=
 SMTP_PASS=
-SMTP_FROM_NAME=NVM Marketplace
-SMTP_FROM_EMAIL=
-APP_BASE_URL=http://localhost:5173
+SMTP_FROM_NAME=NextWave Digital
+SMTP_FROM_EMAIL=your_verified_sender@domain.com
+APP_BASE_URL=https://nvm-frontend.vercel.app
 SUPPORT_EMAIL=
-
-# Optional provider API keys
-# EMAIL_PROVIDER=SENDGRID
-SENDGRID_API_KEY=
-
-# EMAIL_PROVIDER=MAILGUN
-MAILGUN_API_KEY=
-MAILGUN_DOMAIN=
-
-# EMAIL_PROVIDER=RESEND
-RESEND_API_KEY=
+EMAIL_DEBUG_ENABLED=false
+EMAIL_DEBUG_TOKEN=
 
 # Optional extra key used by other modules if needed
 API_MCP_KEY=
+
+# Required for vendor verification document uploads
+CLOUDINARY_CLOUD_NAME=
+CLOUDINARY_API_KEY=
+CLOUDINARY_API_SECRET=
+
+# Optional toggles for vendor management notifications/hooks
+VENDOR_ADMIN_EVENTS_EMAIL_ENABLED=true
+VENDOR_ADMIN_EVENTS_IN_APP_ENABLED=true

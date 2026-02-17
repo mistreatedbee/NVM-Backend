@@ -7,6 +7,7 @@ const Message = require('../models/Message');
 const AuditLog = require('../models/AuditLog');
 const User = require('../models/User');
 const { notifyUser } = require('../services/notificationService');
+const { buildAppUrl } = require('../utils/appUrl');
 
 // @desc    Create new order
 // @route   POST /api/orders
@@ -110,7 +111,7 @@ exports.createOrder = async (req, res, next) => {
       emailTemplate: 'order_confirmation',
       emailContext: {
         orderId: order.orderNumber,
-        actionLinks: [{ label: 'Track order', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/orders/${order._id}/track` }]
+        actionLinks: [{ label: 'Track order', url: buildAppUrl(`/orders/${order._id}/track`) }]
       },
       actor: {
         actorId: req.user.id,
@@ -146,7 +147,7 @@ exports.createOrder = async (req, res, next) => {
         emailTemplate: 'new_order_vendor',
         emailContext: {
           orderId: order.orderNumber,
-          actionLinks: [{ label: 'Open order', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/vendor/orders/${order._id}` }]
+          actionLinks: [{ label: 'Open order', url: buildAppUrl(`/vendor/orders/${order._id}`) }]
         },
         actor: {
           actorId: req.user.id,
@@ -168,10 +169,10 @@ exports.createOrder = async (req, res, next) => {
         orderId: order._id.toString(),
         orderNumber: order.orderNumber
       },
-      emailTemplate: 'invoice_ready',
+      emailTemplate: 'invoice_available',
       emailContext: {
         orderId: order.orderNumber,
-        actionLinks: [{ label: 'View invoice', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/orders/${order._id}/invoice` }]
+        actionLinks: [{ label: 'View invoice', url: buildAppUrl(`/orders/${order._id}/invoice`) }]
       },
       actor: {
         actorId: req.user.id,
@@ -429,6 +430,10 @@ exports.updateOrderStatus = async (req, res, next) => {
 
     const customer = await User.findById(order.customer).select('name email role');
     if (customer) {
+      let customerEmailTemplate = 'order_status_update';
+      if (status === 'delivered') customerEmailTemplate = 'order_delivered';
+      if (status === 'cancelled') customerEmailTemplate = 'order_cancelled';
+
       await notifyUser({
         user: customer,
         type: 'ORDER',
@@ -441,11 +446,11 @@ exports.updateOrderStatus = async (req, res, next) => {
           orderNumber: order.orderNumber,
           status
         },
-        emailTemplate: 'order_status',
+        emailTemplate: customerEmailTemplate,
         emailContext: {
           orderId: order.orderNumber,
           status,
-          actionLinks: [{ label: 'Track order', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/orders/${order._id}/track` }]
+          actionLinks: [{ label: 'Track order', url: buildAppUrl(`/orders/${order._id}/track`) }]
         },
         actor: {
           actorId: req.user.id,

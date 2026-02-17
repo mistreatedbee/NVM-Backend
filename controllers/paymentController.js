@@ -3,6 +3,7 @@ const Order = require('../models/Order');
 const Transaction = require('../models/Transaction');
 const User = require('../models/User');
 const { notifyUser } = require('../services/notificationService');
+const { buildAppUrl } = require('../utils/appUrl');
 
 // @desc    Create payment intent (Stripe)
 // @route   POST /api/payments/create-intent
@@ -68,11 +69,11 @@ exports.confirmPayment = async (req, res, next) => {
           message: `Payment for order ${order.orderNumber} was successful.`,
           linkUrl: `/orders/${order._id}/track`,
           metadata: { event: 'order.payment-success', orderId: order._id.toString() },
-          emailTemplate: 'order_status',
+          emailTemplate: 'order_status_update',
           emailContext: {
             orderId: order.orderNumber,
             status: 'confirmed',
-            actionLinks: [{ label: 'Track order', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/orders/${order._id}/track` }]
+            actionLinks: [{ label: 'Track order', url: buildAppUrl(`/orders/${order._id}/track`) }]
           }
         });
       }
@@ -259,7 +260,7 @@ exports.requestRefund = async (req, res, next) => {
           emailContext: {
             orderId: order.orderNumber,
             amount: amount ? String(amount) : undefined,
-            actionLinks: [{ label: 'View order', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/orders/${order._id}/track` }]
+            actionLinks: [{ label: 'View order', url: buildAppUrl(`/orders/${order._id}/track`) }]
           }
         });
       }

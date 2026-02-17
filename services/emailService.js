@@ -5,7 +5,7 @@ const EmailLog = require('../models/EmailLog');
 let smtpTransporter;
 
 function getProvider() {
-  return String(process.env.EMAIL_PROVIDER || 'SMTP').toUpperCase();
+  return String(process.env.EMAIL_PROVIDER || 'BREVO_API').toUpperCase();
 }
 
 function parsePort(value, fallback = 587) {
@@ -66,6 +66,52 @@ async function sendWithSmtp(payload) {
     messageId: result.messageId,
     accepted: result.accepted,
     rejected: result.rejected
+  };
+}
+
+async function sendWithBrevoApi(payload) {
+  const apiKey = process.env.BREVO_API_KEY;
+  if (!apiKey) {
+    throw new Error('BREVO_API_KEY is missing.');
+  }
+
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'api-key': apiKey,
+      'Content-Type': 'application/json',
+      Accept: 'application/json'
+    },
+    body: JSON.stringify({
+      sender: {
+        name: payload.fromName,
+        email: payload.fromEmail
+      },
+      to: [{ email: payload.to }],
+      subject: payload.subject,
+      htmlContent: payload.html || undefined,
+      textContent: payload.text || undefined,
+      params: payload.metadata || undefined
+    })
+  });
+
+  const responseBody = await response.text();
+  if (!response.ok) {
+    throw new Error(`Brevo API send failed (${response.status}): ${responseBody}`);
+  }
+
+  let parsedBody = null;
+  try {
+    parsedBody = responseBody ? JSON.parse(responseBody) : null;
+  } catch (_error) {
+    parsedBody = responseBody || null;
+  }
+
+  return {
+    provider: 'BREVO_API',
+    status: response.status,
+    messageId: parsedBody?.messageId || null,
+    response: parsedBody
   };
 }
 
@@ -175,6 +221,18 @@ async function sendWithResend(payload) {
 async function sendByProvider(payload) {
   const provider = getProvider();
 
+  if (provider === 'BREVO_API' || provider === 'BREVO') {
+    try {
+      return await sendWithBrevoApi(payload);
+    } catch (error) {
+      const canFallbackToSmtp = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+      if (!canFallbackToSmtp) throw error;
+
+      console.warn('[email] brevo api failed, falling back to smtp', { error: error.message });
+      return sendWithSmtp(payload);
+    }
+  }
+  if (provider === 'BREVO_SMTP') return sendWithSmtp(payload);
   if (provider === 'SMTP') return sendWithSmtp(payload);
   if (provider === 'SENDGRID') return sendWithSendgrid(payload);
   if (provider === 'MAILGUN') return sendWithMailgun(payload);

@@ -18,6 +18,24 @@ const allTemplates = [
 const registry = new Map(allTemplates.map((tpl) => [tpl.key, tpl]));
 
 const aliasMap = {
+  verifyEmail: 'email_verification',
+  resetPassword: 'password_reset',
+  passwordChanged: 'password_changed',
+  vendorPending: 'vendor_registration_received',
+  vendorApproved: 'vendor_approved',
+  vendorRejected: 'vendor_rejected',
+  accountSuspended: 'account_suspended',
+  accountUnsuspended: 'account_unsuspended',
+  accountBanned: 'account_banned',
+  accountUnbanned: 'account_unbanned',
+  orderConfirmationCustomer: 'order_confirmation',
+  newOrderVendor: 'new_order_received',
+  orderStatusUpdateCustomer: 'order_status_update',
+  orderDeliveredCustomer: 'order_delivered',
+  orderCancelledCustomer: 'order_cancelled',
+  invoiceAvailableCustomer: 'invoice_available',
+  newVendorPendingAdmin: 'new_vendor_needs_approval',
+  chatbotEscalationAdmin: 'chatbot_escalation_admin',
   verification: 'email_verification',
   resend_verification_email: 'resend_verification',
   welcome: 'welcome_email',
@@ -30,9 +48,9 @@ const aliasMap = {
   account_status: 'account_status_update',
   order_status: 'order_status_update',
   invoice_ready: 'invoice_available',
+  system_alert: 'new_vendor_needs_approval',
+  admin_escalation: 'chatbot_escalation_admin',
   payout_processed: 'payout_completed',
-  admin_escalation: 'support_ticket_created',
-  system_alert: 'critical_system_alert',
   new_order_vendor: 'new_order_received'
 };
 

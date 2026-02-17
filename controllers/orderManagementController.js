@@ -4,6 +4,7 @@ const Product = require('../models/Product');
 const User = require('../models/User');
 const cloudinary = require('../utils/cloudinary');
 const { notifyUser } = require('../services/notificationService');
+const { buildAppUrl } = require('../utils/appUrl');
 
 // @desc    Upload payment proof
 // @route   POST /api/orders/:orderId/payment-proof
@@ -124,11 +125,11 @@ exports.confirmPayment = async (req, res, next) => {
         message: `Payment for order ${order.orderNumber} was confirmed.`,
         linkUrl: `/orders/${order._id}/track`,
         metadata: { event: 'order.payment-confirmed', orderId: order._id.toString() },
-        emailTemplate: 'order_status',
+        emailTemplate: 'order_status_update',
         emailContext: {
           orderId: order.orderNumber,
           status: 'confirmed',
-          actionLinks: [{ label: 'Track order', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/orders/${order._id}/track` }]
+          actionLinks: [{ label: 'Track order', url: buildAppUrl(`/orders/${order._id}/track`) }]
         }
       });
     }
@@ -185,11 +186,11 @@ exports.rejectPayment = async (req, res, next) => {
         message: `Payment for order ${order.orderNumber} was rejected: ${reason}`,
         linkUrl: `/orders/${order._id}/track`,
         metadata: { event: 'order.payment-rejected', orderId: order._id.toString(), reason },
-        emailTemplate: 'order_status',
+        emailTemplate: 'order_status_update',
         emailContext: {
           orderId: order.orderNumber,
           status: 'payment rejected',
-          actionLinks: [{ label: 'View order', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/orders/${order._id}/track` }]
+          actionLinks: [{ label: 'View order', url: buildAppUrl(`/orders/${order._id}/track`) }]
         }
       });
     }
@@ -245,6 +246,10 @@ exports.updateOrderStatus = async (req, res, next) => {
 
     const customer = await User.findById(order.customer).select('name email role');
     if (customer) {
+      let customerEmailTemplate = 'order_status_update';
+      if (status === 'delivered') customerEmailTemplate = 'order_delivered';
+      if (status === 'cancelled') customerEmailTemplate = 'order_cancelled';
+
       await notifyUser({
         user: customer,
         type: 'ORDER',
@@ -252,11 +257,11 @@ exports.updateOrderStatus = async (req, res, next) => {
         message: `Order ${order.orderNumber} is now ${status}.`,
         linkUrl: `/orders/${order._id}/track`,
         metadata: { event: 'order.status-updated', orderId: order._id.toString(), status },
-        emailTemplate: 'order_status',
+        emailTemplate: customerEmailTemplate,
         emailContext: {
           orderId: order.orderNumber,
           status,
-          actionLinks: [{ label: 'Track order', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/orders/${order._id}/track` }]
+          actionLinks: [{ label: 'Track order', url: buildAppUrl(`/orders/${order._id}/track`) }]
         }
       });
     }

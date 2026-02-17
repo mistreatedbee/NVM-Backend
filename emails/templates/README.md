@@ -23,6 +23,8 @@ Current template names:
 - `vendor_rejected`
 - `account_suspended`
 - `account_banned`
+- `account_unsuspended`
+- `account_unbanned`
 - `account_reinstated`
 - `profile_updated`
 - `account_status_update`
@@ -50,6 +52,7 @@ Current template names:
 - `dispute_opened`
 - `dispute_resolved`
 - `new_vendor_needs_approval`
+- `chatbot_escalation_admin`
 - `fraud_report_alert`
 - `critical_system_alert`
 

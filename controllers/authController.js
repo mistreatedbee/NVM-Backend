@@ -2,14 +2,10 @@ const crypto = require('crypto');
 const User = require('../models/User');
 const { generateToken } = require('../utils/jwt');
 const { notifyUser, safeSendTemplateEmail } = require('../services/notificationService');
+const { buildAppUrl } = require('../utils/appUrl');
 
 function hashToken(rawToken) {
   return crypto.createHash('sha256').update(rawToken).digest('hex');
-}
-
-function buildAppUrl(path) {
-  const base = process.env.APP_BASE_URL || process.env.FRONTEND_URL || 'http://localhost:5173';
-  return `${base}${path}`;
 }
 
 function safeAuthResponse(user, token, message = 'Success') {
@@ -262,7 +258,7 @@ exports.forgotPassword = async (req, res, next) => {
       const resetToken = user.getResetPasswordToken();
       await user.save();
 
-      const resetUrl = buildAppUrl(`/reset-password/${resetToken}`);
+      const resetUrl = buildAppUrl(`/reset-password?token=${resetToken}`);
 
       await safeSendTemplateEmail({
         to: user.email,
@@ -303,11 +299,16 @@ exports.forgotPassword = async (req, res, next) => {
 };
 
 // @desc    Reset password
-// @route   PUT /api/auth/reset-password/:token
+// @route   PUT|POST /api/auth/reset-password/:token
 // @access  Public
 exports.resetPassword = async (req, res, next) => {
   try {
-    const resetPasswordToken = hashToken(req.params.token);
+    const rawToken = req.params?.token || req.body?.token || req.query?.token;
+    if (!rawToken) {
+      return res.status(400).json({ success: false, message: 'Reset token is required' });
+    }
+
+    const resetPasswordToken = hashToken(rawToken);
 
     const user = await User.findOne({
       resetPasswordToken,
@@ -318,7 +319,12 @@ exports.resetPassword = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Invalid or expired token' });
     }
 
-    user.password = req.body.password;
+    const nextPassword = req.body?.newPassword || req.body?.password;
+    if (!nextPassword || String(nextPassword).length < 6) {
+      return res.status(400).json({ success: false, message: 'A valid new password is required (min 6 characters)' });
+    }
+
+    user.password = nextPassword;
     user.resetPasswordToken = undefined;
     user.resetPasswordExpire = undefined;
     await user.save();

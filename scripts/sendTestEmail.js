@@ -1,5 +1,6 @@
 require('dotenv').config();
 const { sendTemplate } = require('../services/emailService');
+const { buildAppUrl } = require('../utils/appUrl');
 
 async function main() {
   const to = process.argv[2];
@@ -13,7 +14,7 @@ async function main() {
   const result = await sendTemplate(templateName, to, {
     userName: 'Local Tester',
     orderId: `NVM-${Date.now()}`,
-    actionUrl: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || 'http://localhost:5173'}/orders`,
+    actionUrl: buildAppUrl('/orders'),
     supportEmail: process.env.SUPPORT_EMAIL || 'support@nvm.local',
     vendorName: 'Sample Vendor',
     status: 'pending',

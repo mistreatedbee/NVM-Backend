@@ -99,6 +99,40 @@ const accountTemplates = [
     }
   }),
   buildTemplate({
+    key: 'account_unsuspended',
+    subject: 'Account unsuspended',
+    requiredVariables: ['userName'],
+    compose: (vars) => {
+      const html = baseLayout({
+        title: 'Account unsuspended',
+        preheader: 'Your access has been restored.',
+        greeting: `Hi ${vars.userName || 'there'},`,
+        paragraphs: ['Your account suspension has been removed and your access is active again.'],
+        cta: { label: actionLabel(vars, 'Sign In'), url: vars.actionUrl || `${vars.appUrl}/login` },
+        supportEmail: vars.supportEmail,
+        footerLinks: [{ label: 'Login', url: `${vars.appUrl}/login` }]
+      });
+      return { html, text: fallbackText({ title: 'Account unsuspended', lines: ['Your account access has been restored.'], actionUrl: vars.actionUrl || `${vars.appUrl}/login` }) };
+    }
+  }),
+  buildTemplate({
+    key: 'account_unbanned',
+    subject: 'Account unbanned',
+    requiredVariables: ['userName'],
+    compose: (vars) => {
+      const html = baseLayout({
+        title: 'Account unbanned',
+        preheader: 'Your account is active again.',
+        greeting: `Hi ${vars.userName || 'there'},`,
+        paragraphs: ['Your account ban has been lifted and you can continue using NVM Marketplace.'],
+        cta: { label: actionLabel(vars, 'Sign In'), url: vars.actionUrl || `${vars.appUrl}/login` },
+        supportEmail: vars.supportEmail,
+        footerLinks: [{ label: 'Login', url: `${vars.appUrl}/login` }]
+      });
+      return { html, text: fallbackText({ title: 'Account unbanned', lines: ['Your account ban has been removed.'], actionUrl: vars.actionUrl || `${vars.appUrl}/login` }) };
+    }
+  }),
+  buildTemplate({
     key: 'account_reinstated',
     subject: 'Account reinstated',
     requiredVariables: ['userName'],

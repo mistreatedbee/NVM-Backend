@@ -135,6 +135,12 @@ const vendorSchema = new mongoose.Schema({
   },
   
   // Status and Approval
+  vendorStatus: {
+    type: String,
+    enum: ['PENDING', 'ACTIVE', 'SUSPENDED', 'REJECTED'],
+    default: 'PENDING',
+    index: true
+  },
   status: {
     type: String,
     enum: ['pending', 'approved', 'rejected', 'suspended'],
@@ -150,12 +156,35 @@ const vendorSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
+  approval: {
+    approvedAt: Date,
+    approvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }
+  },
   rejectionReason: String,
+  rejection: {
+    rejectedAt: Date,
+    rejectedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    rejectionReason: String
+  },
   suspensionReason: String,
   suspendedAt: Date,
   suspendedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
+  },
+  suspension: {
+    suspendedAt: Date,
+    suspendedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    suspensionReason: String
   },
   bannedAt: Date,
   bannedBy: {
@@ -292,8 +321,8 @@ const vendorSchema = new mongoose.Schema({
   },
   verificationStatus: {
     type: String,
-    enum: ['pending', 'verified'],
-    default: 'pending'
+    enum: ['UNVERIFIED', 'VERIFIED', 'REJECTED', 'pending', 'verified'],
+    default: 'UNVERIFIED'
   },
   privacy: {
     showPhone: {
@@ -324,9 +353,12 @@ const vendorSchema = new mongoose.Schema({
 // Indexes
 vendorSchema.index({ status: 1 });
 vendorSchema.index({ accountStatus: 1 });
+vendorSchema.index({ vendorStatus: 1 });
 vendorSchema.index({ category: 1 });
 vendorSchema.index({ rating: -1 });
 vendorSchema.index({ totalSales: -1 });
+vendorSchema.index({ verificationStatus: 1 });
+vendorSchema.index({ createdAt: -1 });
 vendorSchema.index({ 'location.city': 1, 'location.state': 1 });
 vendorSchema.index({ storeName: 'text', description: 'text' });
 vendorSchema.index({ 'documents.status': 1 });

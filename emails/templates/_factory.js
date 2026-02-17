@@ -2,13 +2,14 @@ const { baseLayout } = require('../components/baseLayout');
 const { orderSummaryTable } = require('../components/orderSummaryTable');
 const { statusBadge } = require('../components/statusBadge');
 const { escapeHtml, safeUrl, toText } = require('../components/utils');
+const { getAppBaseUrl } = require('../../utils/appUrl');
 
 function commonVars(vars = {}) {
   const actionUrl = vars.actionUrl || (Array.isArray(vars.actionLinks) && vars.actionLinks[0]?.url) || '';
   const actionLabel = vars.actionLabel || (Array.isArray(vars.actionLinks) && vars.actionLinks[0]?.label) || '';
   return {
     supportEmail: vars.supportEmail || process.env.SUPPORT_EMAIL || 'support@nvm.local',
-    appUrl: vars.appUrl || process.env.APP_BASE_URL || process.env.FRONTEND_URL || 'http://localhost:5173',
+    appUrl: vars.appUrl || getAppBaseUrl(),
     actionUrl,
     actionLabel,
     ...vars

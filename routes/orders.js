@@ -10,15 +10,16 @@ const {
   cancelOrder
 } = require('../controllers/orderController');
 const { authenticate, isVendor, isAdmin } = require('../middleware/auth');
+const { requireActiveVendorAccount } = require('../middleware/requireActiveVendorAccount');
 const { orderValidation, validateId, validate, paginationValidation } = require('../middleware/validator');
 
 router.post('/', authenticate, orderValidation, validate, createOrder);
 router.get('/', authenticate, isAdmin, paginationValidation, validate, getAllOrders);
 router.get('/my/orders', authenticate, paginationValidation, validate, getMyOrders);
 // Vendor orders - just need to be authenticated, will check vendor profile in controller
-router.get('/vendor/orders', authenticate, paginationValidation, validate, getVendorOrders);
+router.get('/vendor/orders', authenticate, isVendor, requireActiveVendorAccount, paginationValidation, validate, getVendorOrders);
 router.get('/:id', authenticate, validateId, validate, getOrder);
-router.put('/:id/status', authenticate, validateId, validate, updateOrderStatus);
+router.put('/:id/status', authenticate, requireActiveVendorAccount, validateId, validate, updateOrderStatus);
 router.put('/:id/cancel', authenticate, validateId, validate, cancelOrder);
 
 module.exports = router;

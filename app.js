@@ -59,6 +59,9 @@ const orderManagementRoutes = require('./routes/orderManagement');
 const invoiceRoutes = require('./routes/invoices');
 const analyticsRoutes = require('./routes/analytics');
 const emailRoutes = require('./routes/emails');
+const debugRoutes = require('./routes/debug');
+const adminVendorManagementRoutes = require('./routes/adminVendorManagement');
+const vendorDocumentsRoutes = require('./routes/vendorDocuments');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -71,6 +74,8 @@ app.use('/api/reviews', reviewRoutes);
 app.use('/api/chats', chatRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/admin/chats', adminChatRoutes);
+app.use('/api/admin', adminVendorManagementRoutes);
+app.use('/api/vendor', vendorDocumentsRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
@@ -79,6 +84,7 @@ app.use('/api/order-management', orderManagementRoutes);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/emails', emailRoutes);
+app.use('/debug', debugRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({

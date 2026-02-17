@@ -1,6 +1,6 @@
-# Email Setup Guide (NVM Backend)
+# Email Setup Guide (NVM Backend + Render + Brevo)
 
-## 1) Where to paste SMTP credentials
+## 1) Render environment variables
 Use your backend environment file:
 - Local backend: `nvm-marketplace-backend/.env`
 - Never commit real secrets to git.
@@ -8,47 +8,36 @@ Use your backend environment file:
 Add these variables:
 
 ```env
-EMAIL_PROVIDER=SMTP
+EMAIL_PROVIDER=BREVO_API
+BREVO_API_KEY=your-brevo-api-key
+
+# Optional SMTP fallback
 SMTP_HOST=smtp-relay.brevo.com
 SMTP_PORT=587
 SMTP_USER=your-smtp-login
 SMTP_PASS=your-smtp-password
-SMTP_FROM_NAME=NVM Marketplace
-SMTP_FROM_EMAIL=no-reply@your-domain.com
-APP_BASE_URL=http://localhost:5173
+SMTP_FROM_NAME=NextWave Digital
+SMTP_FROM_EMAIL=your_verified_sender@domain.com
+APP_BASE_URL=https://nvm-frontend.vercel.app
 SUPPORT_EMAIL=support@your-domain.com
+EMAIL_DEBUG_ENABLED=false
+EMAIL_DEBUG_TOKEN=your-debug-token
 ```
 
-## 2) Optional provider API keys (if not SMTP)
-Set `EMAIL_PROVIDER` and matching key(s):
+On Render: `Service -> Environment -> Add Environment Variable -> Save -> Manual Deploy`.
 
-```env
-EMAIL_PROVIDER=SENDGRID
-SENDGRID_API_KEY=...
-```
-
-```env
-EMAIL_PROVIDER=MAILGUN
-MAILGUN_API_KEY=...
-MAILGUN_DOMAIN=mg.your-domain.com
-```
-
-```env
-EMAIL_PROVIDER=RESEND
-RESEND_API_KEY=...
-```
-
-## 3) Local run
+## 2) Local run
 1. Create/update `nvm-marketplace-backend/.env`.
 2. Install deps: `npm install`
 3. Start backend: `npm run dev`
 4. Send a test email from script:
    - `npm run email:test -- you@example.com email_verification`
 
-## 4) API test endpoints (admin only)
+## 3) API test endpoints (admin only)
 - `GET /api/emails/templates`
 - `POST /api/emails/test`
 - `POST /api/emails/test/verification`
+- `GET /debug/send-test-email?to=you@example.com&token=your-debug-token` (only if `EMAIL_DEBUG_ENABLED=true`)
 
 Example payload:
 
@@ -59,23 +48,12 @@ Example payload:
   "variables": {
     "userName": "Test User",
     "orderId": "NVM-TEST-1001",
-    "actionUrl": "http://localhost:5173/orders"
+    "actionUrl": "https://nvm-frontend.vercel.app/orders"
   }
 }
 ```
 
-## 5) Vercel deployment environment variables
-If backend is deployed on Vercel:
-1. Open Vercel project
-2. Go to `Settings -> Environment Variables`
-3. Add same backend variables (`EMAIL_PROVIDER`, `SMTP_*`, `APP_BASE_URL`, etc.)
-4. Redeploy
-
-If backend is hosted separately (Render/Railway/Docker VPS):
-- Set the same environment variables in that platform's secret manager.
-- Ensure `APP_BASE_URL` points to your deployed frontend URL.
-
-## 6) Security reminders
+## 4) Security reminders
 - Do not hardcode keys in source files.
 - Rotate leaked credentials immediately.
 - Use domain-authenticated sender addresses (SPF/DKIM/DMARC) for deliverability.

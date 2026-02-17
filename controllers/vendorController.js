@@ -6,6 +6,7 @@ const Review = require('../models/Review');
 const AuditLog = require('../models/AuditLog');
 const { notifyUser, notifyAdmins } = require('../services/notificationService');
 const cloudinary = require('../utils/cloudinary');
+const { buildAppUrl } = require('../utils/appUrl');
 
 function addActivityLog(vendor, { action, message, metadata, performedBy, performedByRole }) {
   if (!Array.isArray(vendor.activityLogs)) {
@@ -34,11 +35,16 @@ async function applyVendorAccountStatus(vendor, user, accountStatus, reason, act
 
   if (accountStatus === 'active') {
     vendor.status = 'approved';
+    vendor.vendorStatus = 'ACTIVE';
+    vendor.verificationStatus = vendor.verificationStatus === 'REJECTED' ? 'UNVERIFIED' : (vendor.verificationStatus || 'VERIFIED');
     vendor.isActive = true;
     vendor.approvedAt = now;
     vendor.approvedBy = actorId;
+    vendor.approval = { approvedAt: now, approvedBy: actorId };
     vendor.rejectionReason = undefined;
     vendor.suspensionReason = undefined;
+    vendor.rejection = undefined;
+    vendor.suspension = undefined;
     vendor.suspendedAt = undefined;
     vendor.suspendedBy = undefined;
     vendor.bannedAt = undefined;
@@ -48,6 +54,8 @@ async function applyVendorAccountStatus(vendor, user, accountStatus, reason, act
     user.role = 'vendor';
   } else if (accountStatus === 'pending') {
     vendor.status = 'pending';
+    vendor.vendorStatus = 'PENDING';
+    vendor.verificationStatus = vendor.verificationStatus || 'UNVERIFIED';
     vendor.isActive = true;
     vendor.rejectionReason = reason || undefined;
     vendor.suspensionReason = undefined;
@@ -59,14 +67,21 @@ async function applyVendorAccountStatus(vendor, user, accountStatus, reason, act
     user.isBanned = false;
   } else if (accountStatus === 'suspended') {
     vendor.status = 'suspended';
+    vendor.vendorStatus = 'SUSPENDED';
     vendor.isActive = false;
     vendor.suspensionReason = reason || 'Suspended by admin';
     vendor.suspendedAt = now;
     vendor.suspendedBy = actorId;
+    vendor.suspension = {
+      suspendedAt: now,
+      suspendedBy: actorId,
+      suspensionReason: reason || 'Suspended by admin'
+    };
     user.isActive = false;
     user.isBanned = false;
   } else if (accountStatus === 'banned') {
     vendor.status = 'suspended';
+    vendor.vendorStatus = 'SUSPENDED';
     vendor.isActive = false;
     vendor.suspensionReason = reason || 'Banned by admin';
     vendor.bannedAt = now;
@@ -265,7 +280,7 @@ exports.createVendor = async (req, res, next) => {
       emailTemplate: 'vendor_registration_received',
       emailContext: {
         vendorName: vendor.storeName,
-        actionUrl: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/vendor/approval-status`
+        actionUrl: buildAppUrl('/vendor/approval-status')
       },
       actor: {
         actorId: req.user.id,
@@ -281,10 +296,11 @@ exports.createVendor = async (req, res, next) => {
       message: `${vendor.storeName} submitted registration and needs review.`,
       linkUrl: `/admin/vendors`,
       metadata: { event: 'vendor.awaiting-approval', vendorId: vendor._id.toString() },
-      emailTemplate: 'system_alert',
+      emailTemplate: 'new_vendor_needs_approval',
       emailContext: {
         status: 'vendor-approval-pending',
-        actionLinks: [{ label: 'Review vendor', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/admin/vendors` }]
+        vendorName: vendor.storeName,
+        actionLinks: [{ label: 'Review vendor', url: buildAppUrl('/admin/vendors') }]
       }
     });
 
@@ -692,7 +708,7 @@ exports.updateVendorStatus = async (req, res, next) => {
       emailContext: {
         status: accountStatus,
         reason: reason || undefined,
-        actionLinks: [{ label: 'Open account status', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/vendor/approval-status` }]
+        actionLinks: [{ label: 'Open account status', url: buildAppUrl('/vendor/approval-status') }]
       },
       actor: {
         actorId: req.user.id,
@@ -1391,7 +1407,7 @@ exports.approveVendor = async (req, res, next) => {
       emailTemplate: 'vendor_approved',
       emailContext: {
         vendorName: vendor.storeName,
-        actionLinks: [{ label: 'Go to dashboard', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/vendor/dashboard` }]
+        actionLinks: [{ label: 'Go to dashboard', url: buildAppUrl('/vendor/dashboard') }]
       },
       actor: {
         actorId: req.user.id,
@@ -1434,8 +1450,15 @@ exports.rejectVendor = async (req, res, next) => {
     }
 
     vendor.status = 'rejected';
+    vendor.vendorStatus = 'REJECTED';
+    vendor.verificationStatus = 'REJECTED';
     vendor.accountStatus = 'suspended';
     vendor.rejectionReason = req.body.reason || 'Rejected by admin';
+    vendor.rejection = {
+      rejectedAt: new Date(),
+      rejectedBy: req.user.id,
+      rejectionReason: req.body.reason || 'Rejected by admin'
+    };
     vendor.statusUpdatedAt = new Date();
     vendor.statusUpdatedBy = req.user.id;
     vendor.isActive = false;
@@ -1473,7 +1496,7 @@ exports.rejectVendor = async (req, res, next) => {
         emailTemplate: 'vendor_rejected',
         emailContext: {
           status: req.body.reason || 'rejected',
-          actionLinks: [{ label: 'Review status', url: `${process.env.APP_BASE_URL || process.env.FRONTEND_URL || ''}/vendor/approval-status` }]
+          actionLinks: [{ label: 'Review status', url: buildAppUrl('/vendor/approval-status') }]
         },
         actor: {
           actorId: req.user.id,

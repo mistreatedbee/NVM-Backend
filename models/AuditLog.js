@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 
 const auditLogSchema = new mongoose.Schema({
+  // Legacy/general audit shape
   actorId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -9,20 +10,47 @@ const auditLogSchema = new mongoose.Schema({
   actorRole: {
     type: String,
     enum: ['Customer', 'Vendor', 'Admin', 'Bot', 'System'],
-    required: true
+    default: 'System'
   },
   action: {
     type: String,
-    required: true
+    default: null
   },
   entityType: {
     type: String,
-    enum: ['Conversation', 'Message', 'SupportTicket', 'Notification', 'Vendor', 'User', 'Order', 'System'],
-    required: true
+    enum: ['Conversation', 'Message', 'SupportTicket', 'Notification', 'Vendor', 'User', 'Order', 'System', 'Document'],
+    default: 'System'
   },
   entityId: {
     type: mongoose.Schema.Types.ObjectId,
-    required: true
+    default: null
+  },
+
+  // Vendor-management audit shape
+  actorAdminId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+  actionType: {
+    type: String,
+    enum: [
+      'VENDOR_APPROVE',
+      'VENDOR_REJECT',
+      'VENDOR_SUSPEND',
+      'VENDOR_UNSUSPEND',
+      'DOC_APPROVE',
+      'DOC_REJECT',
+      'VENDOR_VERIFY',
+      'VENDOR_UNVERIFY',
+      'ADMIN_EDIT_VENDOR'
+    ],
+    default: null
+  },
+  targetVendorId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Vendor',
+    default: null
   },
   metadata: mongoose.Schema.Types.Mixed
 }, {
@@ -31,5 +59,8 @@ const auditLogSchema = new mongoose.Schema({
 
 auditLogSchema.index({ entityType: 1, entityId: 1, createdAt: -1 });
 auditLogSchema.index({ action: 1, createdAt: -1 });
+auditLogSchema.index({ targetVendorId: 1, createdAt: -1 });
+auditLogSchema.index({ actorAdminId: 1, createdAt: -1 });
+auditLogSchema.index({ actionType: 1, createdAt: -1 });
 
 module.exports = mongoose.model('AuditLog', auditLogSchema);
