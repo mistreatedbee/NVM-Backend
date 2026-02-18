@@ -10,13 +10,18 @@ function isVendorActive(vendor) {
   return vendor.status === 'approved' && vendor.accountStatus === 'active';
 }
 
+function normalizeRole(role) {
+  return String(role || '').toUpperCase();
+}
+
 exports.requireActiveVendorAccount = async (req, res, next) => {
   try {
-    if (!req.user || req.user.role === 'admin') {
+    const role = normalizeRole(req.user?.role);
+    if (!req.user || role === 'ADMIN') {
       return next();
     }
 
-    if (req.user.role !== 'vendor') {
+    if (role !== 'VENDOR') {
       return res.status(403).json({
         success: false,
         message: 'Vendor privileges required'
