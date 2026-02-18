@@ -77,6 +77,22 @@ const orderItemSchema = new mongoose.Schema({
   lineTotal: {
     type: Number
   },
+  vendorGross: {
+    type: Number,
+    default: 0
+  },
+  commissionPercent: {
+    type: Number,
+    default: 0
+  },
+  commissionAmount: {
+    type: Number,
+    default: 0
+  },
+  vendorNet: {
+    type: Number,
+    default: 0
+  },
   // Vendor-specific status
   status: {
     type: String,
@@ -216,6 +232,10 @@ const orderSchema = new mongoose.Schema({
     default: 'DELIVERY'
   },
   collectionPoint: {
+    pickupPointId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'PickupPoint'
+    },
     name: String,
     address: String,
     phone: String,
@@ -234,6 +254,17 @@ const orderSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  deliveryFeeBreakdown: [{
+    vendorId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Vendor'
+    },
+    zoneId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'DeliveryZone'
+    },
+    fee: Number
+  }],
   totals: {
     subtotal: { type: Number, default: 0 },
     delivery: { type: Number, default: 0 },

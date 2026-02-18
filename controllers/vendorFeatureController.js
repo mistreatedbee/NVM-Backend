@@ -154,24 +154,16 @@ function assertActiveVendor(vendor) {
 }
 
 async function uploadImageBuffer(buffer, folder, transformation) {
-  const result = await new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      {
-        folder,
-        resource_type: 'image',
-        transformation
-      },
-      (error, uploadResult) => {
-        if (error) reject(error);
-        else resolve(uploadResult);
-      }
-    );
-    stream.end(buffer);
+  const result = await cloudinary.uploadAsset({
+    buffer,
+    folder,
+    resourceType: 'image',
+    transformation
   });
 
   return {
-    public_id: result.public_id,
-    url: result.secure_url
+    public_id: result.publicId,
+    url: result.originalUrl
   };
 }
 

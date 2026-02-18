@@ -7,6 +7,8 @@ const AuditLog = require('../models/AuditLog');
 const { notifyUser, notifyAdmins } = require('../services/notificationService');
 const cloudinary = require('../utils/cloudinary');
 const { buildAppUrl } = require('../utils/appUrl');
+const { createCacheKey, getCached, setCached } = require('../utils/cache');
+const { getPaginationParams, paginatedResult } = require('../utils/pagination');
 
 function addActivityLog(vendor, { action, message, metadata, performedBy, performedByRole }) {
   if (!Array.isArray(vendor.activityLogs)) {
@@ -173,28 +175,20 @@ async function uploadVendorImage(buffer, folderSuffix, transformation) {
     throw configError;
   }
 
-  const result = await new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder: `nvm/vendors/${folderSuffix}`,
-        resource_type: 'image',
-        transformation
-      },
-      (error, uploadResult) => {
-        if (error) {
-          const uploadError = new Error(`Image upload failed: ${error.message || 'unknown Cloudinary error'}`);
-          uploadError.statusCode = 502;
-          reject(uploadError);
-        }
-        else resolve(uploadResult);
-      }
-    );
-    uploadStream.end(buffer);
+  const result = await cloudinary.uploadAsset({
+    buffer,
+    folder: `nvm/vendors/${folderSuffix}`,
+    resourceType: 'image',
+    transformation
+  }).catch((error) => {
+    const uploadError = new Error(`Image upload failed: ${error.message || 'unknown Cloudinary error'}`);
+    uploadError.statusCode = 502;
+    throw uploadError;
   });
 
   return {
-    public_id: result.public_id,
-    url: result.secure_url
+    public_id: result.publicId,
+    url: result.originalUrl
   };
 }
 
@@ -232,28 +226,20 @@ exports.createVendor = async (req, res, next) => {
 
     if (req.file) {
       try {
-        const result = await new Promise((resolve, reject) => {
-          const uploadStream = cloudinary.uploader.upload_stream(
-            {
-              folder: 'nvm/vendors',
-              resource_type: 'auto',
-              transformation: [
-                { width: 500, height: 500, crop: 'limit' },
-                { quality: 'auto' },
-                { fetch_format: 'auto' }
-              ]
-            },
-            (error, uploadResult) => {
-              if (error) reject(error);
-              else resolve(uploadResult);
-            }
-          );
-          uploadStream.end(req.file.buffer);
+        const result = await cloudinary.uploadAsset({
+          buffer: req.file.buffer,
+          folder: 'nvm/vendors',
+          resourceType: 'image',
+          transformation: [
+            { width: 500, height: 500, crop: 'limit' },
+            { quality: 'auto' },
+            { fetch_format: 'auto' }
+          ]
         });
 
         vendorData.logo = {
-          public_id: result.public_id,
-          url: result.secure_url
+          public_id: result.publicId,
+          url: result.originalUrl
         };
       } catch (uploadError) {
         console.error('Logo upload error:', uploadError);
@@ -403,9 +389,7 @@ exports.getVendorBySlug = async (req, res, next) => {
 // @access  Public (approved only)
 exports.getAllVendors = async (req, res, next) => {
   try {
-    const page = parseInt(req.query.page, 10) || 1;
-    const limit = parseInt(req.query.limit, 10) || 12;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = getPaginationParams(req.query, { limit: 12, maxLimit: 100 });
 
     const query = {
       status: 'approved',
@@ -441,14 +425,85 @@ exports.getAllVendors = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      count: vendors.length,
-      total,
-      pages: Math.ceil(total / limit),
-      currentPage: page,
-      data: vendors.map((vendor) => buildVendorPublicProfile(vendor))
+      ...paginatedResult({
+        data: vendors.map((vendor) => buildVendorPublicProfile(vendor)),
+        page,
+        limit,
+        total
+      })
     });
   } catch (error) {
     next(error);
+  }
+};
+
+// @desc    Get vendors nearby
+// @route   GET /api/vendors/nearby
+// @access  Public
+exports.getNearbyVendors = async (req, res, next) => {
+  try {
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    const radiusKm = Math.max(Number(req.query.radiusKm) || 20, 1);
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
+    const skip = (page - 1) * limit;
+    const search = String(req.query.q || '').trim();
+    const category = String(req.query.category || '').trim();
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return res.status(400).json({ success: false, message: 'lat and lng query params are required' });
+    }
+
+    const cacheKey = createCacheKey('vendors:nearby', {
+      lat, lng, radiusKm, page, limit, search, category
+    });
+    const cached = getCached(cacheKey);
+    if (cached) {
+      return res.status(200).json({ success: true, ...cached, cached: true });
+    }
+
+    const vendorQuery = {
+      vendorStatus: 'ACTIVE',
+      geoLocation: {
+        $near: {
+          $geometry: { type: 'Point', coordinates: [lng, lat] },
+          $maxDistance: radiusKm * 1000
+        }
+      }
+    };
+
+    if (search) {
+      vendorQuery.$or = [
+        { storeName: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    if (category) {
+      const productVendorIds = await Product.distinct('vendor', {
+        category: { $regex: `^${category}$`, $options: 'i' },
+        isActive: true
+      });
+      vendorQuery._id = { $in: productVendorIds };
+    }
+
+    const [vendors, total] = await Promise.all([
+      Vendor.find(vendorQuery).skip(skip).limit(limit),
+      Vendor.countDocuments(vendorQuery)
+    ]);
+
+    const payload = {
+      data: vendors,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1
+    };
+    setCached(cacheKey, payload, 5 * 60 * 1000);
+    return res.status(200).json({ success: true, ...payload });
+  } catch (error) {
+    return next(error);
   }
 };
 
@@ -457,9 +512,7 @@ exports.getAllVendors = async (req, res, next) => {
 // @access  Private (Admin)
 exports.getAdminVendors = async (req, res, next) => {
   try {
-    const page = parseInt(req.query.page, 10) || 1;
-    const limit = parseInt(req.query.limit, 10) || 20;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = getPaginationParams(req.query, { limit: 20, maxLimit: 100 });
 
     const query = {};
     if (req.query.status && req.query.status !== 'all') {
@@ -493,11 +546,7 @@ exports.getAdminVendors = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      count: vendors.length,
-      total,
-      pages: Math.ceil(total / limit),
-      currentPage: page,
-      data: vendors
+      ...paginatedResult({ data: vendors, page, limit, total })
     });
   } catch (error) {
     next(error);
@@ -769,23 +818,15 @@ exports.uploadVendorDocument = async (req, res, next) => {
     let file = { public_id: req.body.public_id || '', url: req.body.url || '' };
 
     if (req.file) {
-      const result = await new Promise((resolve, reject) => {
-        const uploadStream = cloudinary.uploader.upload_stream(
-          {
-            folder: 'nvm/vendor-documents',
-            resource_type: 'auto'
-          },
-          (error, uploadResult) => {
-            if (error) reject(error);
-            else resolve(uploadResult);
-          }
-        );
-        uploadStream.end(req.file.buffer);
+      const result = await cloudinary.uploadAsset({
+        buffer: req.file.buffer,
+        folder: 'nvm/docs/vendor-documents',
+        resourceType: 'auto'
       });
 
       file = {
-        public_id: result.public_id,
-        url: result.secure_url
+        public_id: result.publicId,
+        url: result.originalUrl
       };
     }
 
@@ -943,8 +984,7 @@ exports.getVendorDocuments = async (req, res, next) => {
       });
     }
 
-    const page = parseInt(req.query.page, 10) || 1;
-    const limit = parseInt(req.query.limit, 10) || 10;
+    const { page, limit } = getPaginationParams(req.query, { limit: 10, maxLimit: 100 });
     const status = req.query.status;
     const type = req.query.type;
 
@@ -962,11 +1002,7 @@ exports.getVendorDocuments = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      count: paginated.length,
-      total,
-      pages: Math.ceil(total / limit),
-      currentPage: page,
-      data: paginated
+      ...paginatedResult({ data: paginated, page, limit, total })
     });
   } catch (error) {
     next(error);
@@ -987,8 +1023,7 @@ exports.getVendorActivityLogs = async (req, res, next) => {
       });
     }
 
-    const page = parseInt(req.query.page, 10) || 1;
-    const limit = parseInt(req.query.limit, 10) || 20;
+    const { page, limit } = getPaginationParams(req.query, { limit: 20, maxLimit: 100 });
     const action = req.query.action;
 
     let logs = Array.isArray(vendor.activityLogs) ? vendor.activityLogs : [];
@@ -1002,11 +1037,7 @@ exports.getVendorActivityLogs = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      count: paginated.length,
-      total,
-      pages: Math.ceil(total / limit),
-      currentPage: page,
-      data: paginated
+      ...paginatedResult({ data: paginated, page, limit, total })
     });
   } catch (error) {
     next(error);

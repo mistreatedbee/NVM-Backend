@@ -1,61 +1,80 @@
-// Basic security middleware (without external dependencies for now)
-// Install express-rate-limit and helmet for production: npm install express-rate-limit helmet
+const rateLimit = require('express-rate-limit');
+const helmet = require('helmet');
 
-// Simple rate limiting (can be enhanced with express-rate-limit)
-export const apiLimiter = (req, res, next) => {
-  // Basic rate limiting logic
-  // In production, use express-rate-limit package
-  next();
-};
+const trustedOrigins = new Set(
+  [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    process.env.FRONTEND_URL
+  ].filter(Boolean)
+);
 
-export const authLimiter = (req, res, next) => {
-  // Basic auth rate limiting
-  // In production, use express-rate-limit package
-  next();
-};
+function isTrustedOrigin(origin) {
+  if (!origin) return true;
+  if (trustedOrigins.has(origin)) return true;
+  return origin.includes('vercel.app') || origin.includes('localhost');
+}
 
-// Security headers (can be enhanced with helmet)
-export const securityHeaders = (req, res, next) => {
-  // Basic security headers
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  // In production, use helmet package for comprehensive headers
-  next();
-};
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 500,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many requests, please try again later.' }
+});
 
-// Input sanitization helper
-export const sanitizeInput = (input) => {
-  if (typeof input === 'string') {
-    // Remove potentially dangerous characters
-    return input
-      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-      .trim();
-  }
-  if (Array.isArray(input)) {
-    return input.map(sanitizeInput);
-  }
-  if (typeof input === 'object' && input !== null) {
-    const sanitized = {};
-    for (const key in input) {
-      sanitized[key] = sanitizeInput(input[key]);
-    }
-    return sanitized;
-  }
-  return input;
-};
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many auth attempts, please try again later.' }
+});
 
-// Request sanitization middleware
-export const sanitizeRequest = (req, res, next) => {
-  if (req.body) {
-    req.body = sanitizeInput(req.body);
+const searchLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Search rate limit exceeded.' }
+});
+
+const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Upload rate limit exceeded.' }
+});
+
+const sensitiveWriteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 80,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Sensitive action rate limit exceeded.' }
+});
+
+function requireTrustedOrigin(req, res, next) {
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    return next();
   }
-  if (req.query) {
-    req.query = sanitizeInput(req.query);
-  }
-  if (req.params) {
-    req.params = sanitizeInput(req.params);
-  }
-  next();
+
+  const origin = req.get('origin');
+  if (isTrustedOrigin(origin)) return next();
+
+  return res.status(403).json({
+    success: false,
+    message: 'Origin is not allowed for this operation'
+  });
+}
+
+module.exports = {
+  securityHeaders: helmet(),
+  apiLimiter,
+  authLimiter,
+  searchLimiter,
+  uploadLimiter,
+  sensitiveWriteLimiter,
+  requireTrustedOrigin
 };

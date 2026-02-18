@@ -7,11 +7,10 @@ const Product = require('../models/Product');
 const Review = require('../models/Review');
 const AuditLog = require('../models/AuditLog');
 const { logAudit, resolveIp } = require('../services/loggingService');
+const { getPaginationParams, paginatedResult } = require('../utils/pagination');
 
 function parsePagination(query, defaultLimit = 20) {
-  const page = Math.max(1, parseInt(query.page, 10) || 1);
-  const limit = Math.min(100, Math.max(1, parseInt(query.limit, 10) || defaultLimit));
-  return { page, limit, skip: (page - 1) * limit };
+  return getPaginationParams(query, { limit: defaultLimit, maxLimit: 100 });
 }
 
 function parseDateRange(query) {
@@ -65,11 +64,7 @@ exports.getAdminActivity = async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
-      data: items,
-      total,
-      page,
-      limit,
-      pages: Math.ceil(total / limit)
+      ...paginatedResult({ data: items, page, limit, total })
     });
   } catch (error) {
     return next(error);
@@ -112,11 +107,7 @@ exports.getAdminUsersList = async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
-      data: users,
-      total,
-      page,
-      limit,
-      pages: Math.ceil(total / limit)
+      ...paginatedResult({ data: users, page, limit, total })
     });
   } catch (error) {
     return next(error);
@@ -140,11 +131,7 @@ exports.getAdminUserActivity = async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
-      data: items,
-      total,
-      page,
-      limit,
-      pages: Math.ceil(total / limit)
+      ...paginatedResult({ data: items, page, limit, total })
     });
   } catch (error) {
     return next(error);
@@ -263,11 +250,7 @@ exports.getVendorsCompliance = async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
-      data,
-      total,
-      page,
-      limit,
-      pages: Math.ceil(total / limit)
+      ...paginatedResult({ data, page, limit, total })
     });
   } catch (error) {
     return next(error);
@@ -381,11 +364,7 @@ exports.getAdminAuditLogs = async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
-      data: items,
-      total,
-      page,
-      limit,
-      pages: Math.ceil(total / limit)
+      ...paginatedResult({ data: items, page, limit, total })
     });
   } catch (error) {
     return next(error);

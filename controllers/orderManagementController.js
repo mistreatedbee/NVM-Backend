@@ -2,11 +2,13 @@ const Order = require('../models/Order');
 const Vendor = require('../models/Vendor');
 const Product = require('../models/Product');
 const User = require('../models/User');
-const cloudinary = require('../utils/cloudinary');
+const { uploadByType } = require('../utils/uploadAsset');
+const { getPaginationParams, paginatedResult } = require('../utils/pagination');
 const { notifyUser } = require('../services/notificationService');
 const { buildAppUrl } = require('../utils/appUrl');
 const { issueInvoicesForOrder } = require('../services/invoiceService');
 const { recordPurchaseEventsForOrder } = require('../services/productAnalyticsService');
+const { applyCommissionToOrder } = require('../services/commissionService');
 
 // @desc    Upload payment proof
 // @route   POST /api/orders/:orderId/payment-proof
@@ -36,21 +38,20 @@ exports.uploadPaymentProof = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Please upload payment proof image' });
     }
 
-    // Upload to Cloudinary
-    const result = await cloudinary.uploader.upload(req.file.path, {
-      folder: 'nvm-payment-proofs',
-      resource_type: 'image'
+    const result = await uploadByType({
+      file: req.file,
+      type: 'doc',
+      folder: 'nvm/docs/payment-proofs',
+      resourceType: 'auto'
     });
-
-    // Delete old payment proof if exists
-    if (order.paymentProof && order.paymentProof.public_id) {
-      await cloudinary.uploader.destroy(order.paymentProof.public_id);
+    if (!result) {
+      return res.status(400).json({ success: false, message: 'Invalid payment proof file' });
     }
 
     // Update order
     order.paymentProof = {
-      public_id: result.public_id,
-      url: result.secure_url,
+      public_id: result.publicId,
+      url: result.originalUrl,
       uploadedAt: new Date()
     };
     order.paymentStatus = 'awaiting-confirmation';
@@ -112,6 +113,7 @@ exports.confirmPayment = async (req, res, next) => {
     order.confirmedAt = new Date();
 
     await order.save();
+    await applyCommissionToOrder(order);
     await recordPurchaseEventsForOrder({ order, source: 'DIRECT', actorUserId: req.user.id });
     await issueInvoicesForOrder({ orderId: order._id, actorId: req.user.id });
 
@@ -349,9 +351,7 @@ exports.getVendorOrders = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Vendor profile not found' });
     }
 
-    const page = parseInt(req.query.page, 10) || 1;
-    const limit = parseInt(req.query.limit, 10) || 20;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = getPaginationParams(req.query, { limit: 20, maxLimit: 100 });
 
     // Build query
     const query = { 'items.vendor': vendor._id };
@@ -375,11 +375,7 @@ exports.getVendorOrders = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      count: orders.length,
-      total,
-      pages: Math.ceil(total / limit),
-      currentPage: page,
-      data: orders
+      ...paginatedResult({ data: orders, page, limit, total })
     });
   } catch (error) {
     next(error);

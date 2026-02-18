@@ -66,6 +66,14 @@ const userSchema = new mongoose.Schema({
   verificationTokenExpire: Date,
   resetPasswordToken: String,
   resetPasswordExpire: Date,
+  twoFactorEnabled: {
+    type: Boolean,
+    default: false
+  },
+  twoFactorSecretEncrypted: {
+    type: String,
+    default: ''
+  },
   addresses: [{
     fullName: String,
     phone: String,

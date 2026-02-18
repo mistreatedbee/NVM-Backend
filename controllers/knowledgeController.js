@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const KnowledgeArticle = require('../models/KnowledgeArticle');
 const Resource = require('../models/Resource');
 const ContentView = require('../models/ContentView');
-const cloudinary = require('../utils/cloudinary');
+const { uploadByType } = require('../utils/uploadAsset');
 
 const CATEGORY_VALUES = [
   'GETTING_STARTED',
@@ -96,22 +96,11 @@ function getIpHash(req) {
 
 async function uploadBufferToCloudinary(file) {
   if (!file?.buffer) throw new Error('No upload buffer provided');
-  const folder = process.env.KNOWLEDGE_RESOURCE_UPLOAD_FOLDER || 'nvm/knowledge/resources';
-
-  return new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder,
-        resource_type: 'auto',
-        use_filename: true,
-        unique_filename: true
-      },
-      (error, result) => {
-        if (error) return reject(error);
-        resolve(result);
-      }
-    );
-    uploadStream.end(file.buffer);
+  return uploadByType({
+    file,
+    type: 'doc',
+    folder: process.env.KNOWLEDGE_RESOURCE_UPLOAD_FOLDER || 'nvm/knowledge/resources',
+    resourceType: 'auto'
   });
 }
 
@@ -558,8 +547,8 @@ exports.uploadKnowledgeResourceFile = async (req, res, next) => {
     return res.status(201).json({
       success: true,
       data: {
-        fileUrl: result.secure_url,
-        storageKey: result.public_id,
+        fileUrl: result.originalUrl,
+        storageKey: result.publicId,
         fileName: req.file.originalname,
         fileSize: req.file.size,
         mimeType: req.file.mimetype

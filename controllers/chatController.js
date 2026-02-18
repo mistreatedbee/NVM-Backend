@@ -10,7 +10,7 @@ const { botReply } = require('../utils/chatbot');
 const { getIO } = require('../socket');
 const { notifyAdmins } = require('../services/notificationService');
 const { buildAppUrl } = require('../utils/appUrl');
-const cloudinary = require('../utils/cloudinary');
+const { uploadByType } = require('../utils/uploadAsset');
 
 const URGENT_KEYWORDS = ['payment issue', 'fraud', 'dispute', 'chargeback', 'scam'];
 const AUTO_ESCALATE_AFTER_ATTEMPTS = 3;
@@ -193,30 +193,21 @@ exports.uploadChatAttachment = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'File is required' });
     }
 
-    const folder = process.env.CHAT_ATTACHMENT_UPLOAD_FOLDER || 'nvm/chat/attachments';
-
-    const result = await new Promise((resolve, reject) => {
-      const uploadStream = cloudinary.uploader.upload_stream(
-        {
-          folder,
-          resource_type: 'auto',
-          use_filename: true,
-          unique_filename: true
-        },
-        (error, uploaded) => {
-          if (error) return reject(error);
-          return resolve(uploaded);
-        }
-      );
-
-      uploadStream.end(req.file.buffer);
+    const result = await uploadByType({
+      file: req.file,
+      type: 'doc',
+      folder: process.env.CHAT_ATTACHMENT_UPLOAD_FOLDER || 'nvm/chat/attachments',
+      resourceType: 'auto'
     });
+    if (!result) {
+      return res.status(400).json({ success: false, message: 'Invalid file upload' });
+    }
 
     return res.status(201).json({
       success: true,
       data: {
-        url: result.secure_url,
-        public_id: result.public_id,
+        url: result.originalUrl,
+        public_id: result.publicId,
         fileName: req.file.originalname,
         mimeType: req.file.mimetype,
         size: req.file.size

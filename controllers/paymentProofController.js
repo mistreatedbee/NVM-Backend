@@ -1,12 +1,13 @@
-const fs = require('fs');
 const mongoose = require('mongoose');
 const Order = require('../models/Order');
 const PaymentProof = require('../models/PaymentProof');
 const User = require('../models/User');
 const Vendor = require('../models/Vendor');
 const AuditLog = require('../models/AuditLog');
-const cloudinary = require('../utils/cloudinary');
+const { uploadByType } = require('../utils/uploadAsset');
+const { getPaginationParams, paginatedResult } = require('../utils/pagination');
 const { notifyUser, notifyAdmins } = require('../services/notificationService');
+const { applyCommissionToOrder } = require('../services/commissionService');
 
 function isObjectId(id) {
   return mongoose.Types.ObjectId.isValid(id);
@@ -48,11 +49,15 @@ exports.uploadPaymentProof = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Only PDF, JPG, and PNG files are allowed' });
     }
 
-    const upload = await cloudinary.uploader.upload(req.file.path, {
-      folder: 'nvm-payment-proofs',
-      resource_type: 'auto'
+    const upload = await uploadByType({
+      file: req.file,
+      type: 'doc',
+      folder: 'nvm/docs/payment-proofs',
+      resourceType: 'auto'
     });
-    try { fs.unlinkSync(req.file.path); } catch (_error) {}
+    if (!upload) {
+      return res.status(400).json({ success: false, message: 'Invalid payment proof file' });
+    }
 
     await PaymentProof.updateMany(
       { orderId: order._id, customerId: req.user.id, status: 'UNDER_REVIEW' },
@@ -62,7 +67,7 @@ exports.uploadPaymentProof = async (req, res, next) => {
     const proof = await PaymentProof.create({
       orderId: order._id,
       customerId: req.user.id,
-      fileUrl: upload.secure_url,
+      fileUrl: upload.originalUrl,
       fileName: req.file.originalname,
       mimeType: req.file.mimetype,
       size: req.file.size,
@@ -72,6 +77,7 @@ exports.uploadPaymentProof = async (req, res, next) => {
 
     order.paymentStatus = 'UNDER_REVIEW';
     await order.save();
+    await applyCommissionToOrder(order);
 
     await notifyAdmins({
       type: 'SYSTEM',
@@ -135,9 +141,7 @@ exports.getMyPaymentProof = async (req, res, next) => {
 // GET /api/admin/payment-proofs
 exports.getAdminPaymentProofs = async (req, res, next) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = getPaginationParams(req.query, { limit: 20, maxLimit: 100 });
     const query = {};
     const normalizedStatus = normalizeQueryStatus(req.query.status);
     if (normalizedStatus) query.status = normalizedStatus;
@@ -165,10 +169,7 @@ exports.getAdminPaymentProofs = async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
-      total,
-      page,
-      pages: Math.ceil(total / limit),
-      data
+      ...paginatedResult({ data, page, limit, total })
     });
   } catch (error) {
     return next(error);

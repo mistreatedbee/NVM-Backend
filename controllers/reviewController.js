@@ -6,6 +6,7 @@ const Order = require('../models/Order');
 const HelpfulVote = require('../models/HelpfulVote');
 const ReviewReport = require('../models/ReviewReport');
 const { logActivity, logAudit, resolveIp } = require('../services/loggingService');
+const { getPaginationParams, paginatedResult } = require('../utils/pagination');
 
 const ALLOWED_SORT = new Set(['newest', 'highest', 'lowest', 'helpful']);
 const REVIEW_EDIT_WINDOW_DAYS = 30;
@@ -22,9 +23,7 @@ function sanitizeText(input = '') {
 }
 
 function parsePagination(query) {
-  const page = Math.max(1, parseInt(query.page, 10) || 1);
-  const limit = Math.min(50, Math.max(1, parseInt(query.limit, 10) || 10));
-  return { page, limit, skip: (page - 1) * limit };
+  return getPaginationParams(query, { limit: 10, maxLimit: 50 });
 }
 
 function parseSort(sort) {
@@ -317,11 +316,12 @@ exports.getAllReviews = async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
-      count: reviews.length,
-      total,
-      pages: Math.ceil(total / limit),
-      currentPage: page,
-      data: reviews.map(normalizeReviewPayload)
+      ...paginatedResult({
+        data: reviews.map(normalizeReviewPayload),
+        page,
+        limit,
+        total
+      })
     });
   } catch (error) {
     return next(error);
@@ -351,11 +351,12 @@ async function listTargetReviews({ req, res, targetType, targetField, targetId }
 
   return res.status(200).json({
     success: true,
-    count: reviews.length,
-    total,
-    pages: Math.ceil(total / limit),
-    currentPage: page,
-    data: reviews.map(normalizeReviewPayload)
+    ...paginatedResult({
+      data: reviews.map(normalizeReviewPayload),
+      page,
+      limit,
+      total
+    })
   });
 }
 
@@ -615,11 +616,12 @@ exports.getAdminReviews = async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
-      count: reviews.length,
-      total,
-      pages: Math.ceil(total / limit),
-      currentPage: page,
-      data: reviews.map(normalizeReviewPayload)
+      ...paginatedResult({
+        data: reviews.map(normalizeReviewPayload),
+        page,
+        limit,
+        total
+      })
     });
   } catch (error) {
     return next(error);

@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const { securityHeaders, apiLimiter, requireTrustedOrigin, sensitiveWriteLimiter } = require('./middleware/security');
 
 dotenv.config();
 
@@ -38,6 +39,13 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(securityHeaders);
+app.use('/api', apiLimiter);
+app.use('/api', requireTrustedOrigin);
+app.use('/api/reports', sensitiveWriteLimiter);
+app.use('/api/disputes', sensitiveWriteLimiter);
+app.use('/api/support', sensitiveWriteLimiter);
+app.use('/api/uploads', sensitiveWriteLimiter);
 
 const errorHandler = require('./middleware/errorHandler');
 
@@ -99,6 +107,13 @@ const adminSupportRoutes = require('./routes/adminSupport');
 const adminReturnsRoutes = require('./routes/adminReturns');
 const adminPaymentProofRoutes = require('./routes/adminPaymentProofs');
 const disputeRoutes = require('./routes/disputes');
+const reportRoutes = require('./routes/reports');
+const logisticsRoutes = require('./routes/logistics');
+const pickupPointRoutes = require('./routes/pickupPoints');
+const adminLogisticsRoutes = require('./routes/adminLogistics');
+const vendorLogisticsRoutes = require('./routes/vendorLogistics');
+const uploadRoutes = require('./routes/uploads');
+const monetizationRoutes = require('./routes/monetization');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -127,6 +142,7 @@ app.use('/api/admin', adminHelpRoutes);
 app.use('/api/admin', adminSupportRoutes);
 app.use('/api/admin', adminReturnsRoutes);
 app.use('/api/admin', adminPaymentProofRoutes);
+app.use('/api/admin', adminLogisticsRoutes);
 app.use('/api/vendor', vendorDocumentsRoutes);
 app.use('/api/vendor', vendorProductsRoutes);
 app.use('/api/vendor', vendorFeaturesRoutes);
@@ -134,6 +150,7 @@ app.use('/api/vendor', vendorOrdersRoutes);
 app.use('/api/vendor', vendorFinanceRoutes);
 app.use('/api/vendor', vendorToolkitRoutes);
 app.use('/api/vendor', vendorDashboardRoutes);
+app.use('/api/vendor', vendorLogisticsRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
@@ -156,7 +173,12 @@ app.use('/api/alerts', alertsRoutes);
 app.use('/api/addresses', addressesRoutes);
 app.use('/api/checkout', checkoutRoutes);
 app.use('/api/disputes', disputeRoutes);
+app.use('/api/reports', reportRoutes);
 app.use('/api/content', contentRoutes);
+app.use('/api/logistics', logisticsRoutes);
+app.use('/api/pickup-points', pickupPointRoutes);
+app.use('/api/uploads', uploadRoutes);
+app.use('/api/monetization', monetizationRoutes);
 app.use('/api', productQaRoutes);
 app.use('/debug', debugRoutes);
 
