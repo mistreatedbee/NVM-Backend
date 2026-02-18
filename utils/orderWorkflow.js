@@ -141,7 +141,7 @@ function normalizePaymentStatus(status) {
   if (!status) return 'PENDING';
   if (typeof status !== 'string') return 'PENDING';
   const upper = status.toUpperCase();
-  if (['PENDING', 'PAID', 'FAILED', 'REFUNDED', 'AWAITING-CONFIRMATION'].includes(upper)) {
+  if (['PENDING', 'PAID', 'FAILED', 'REFUNDED', 'AWAITING-CONFIRMATION', 'AWAITING_PAYMENT', 'UNDER_REVIEW', 'REJECTED'].includes(upper)) {
     return upper;
   }
   return 'PENDING';

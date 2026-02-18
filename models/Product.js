@@ -53,6 +53,17 @@ const productSchema = new mongoose.Schema({
   },
   subcategory: String,
   tags: [String],
+  brand: {
+    type: String,
+    trim: true,
+    maxlength: [120, 'Brand cannot be more than 120 characters']
+  },
+  location: {
+    city: String,
+    state: String,
+    country: String,
+    serviceArea: String
+  },
   
   // Pricing
   price: {
@@ -92,8 +103,10 @@ const productSchema = new mongoose.Schema({
   // Variants (e.g., size, color)
   variants: [{
     name: String, // e.g., "Size: Large, Color: Red"
+    options: [String],
     sku: String,
     price: Number,
+    priceOverride: Number,
     stock: Number,
     attributes: [{
       key: String, // e.g., "Size"
@@ -107,6 +120,17 @@ const productSchema = new mongoose.Schema({
     url: {
       type: String,
       required: true
+    },
+    alt: String
+  }],
+  specifications: [{
+    key: {
+      type: String,
+      trim: true
+    },
+    value: {
+      type: String,
+      trim: true
     }
   }],
   
@@ -276,10 +300,13 @@ const productSchema = new mongoose.Schema({
 productSchema.index({ vendor: 1 });
 productSchema.index({ vendorId: 1 });
 productSchema.index({ category: 1 });
+productSchema.index({ brand: 1 });
+productSchema.index({ 'location.city': 1, 'location.state': 1 });
 productSchema.index({ status: 1 });
 productSchema.index({ isActive: 1 });
 productSchema.index({ status: 1, isActive: 1, createdAt: -1 });
 productSchema.index({ price: 1 });
+productSchema.index({ ratingAvg: -1 });
 productSchema.index({ rating: -1 });
 productSchema.index({ totalSales: -1 });
 productSchema.index({ createdAt: -1 });

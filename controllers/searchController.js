@@ -2,6 +2,8 @@ const SearchHistory = require('../models/SearchHistory');
 const Recommendation = require('../models/Recommendation');
 const Product = require('../models/Product');
 const Order = require('../models/Order');
+const Category = require('../models/Category');
+const Vendor = require('../models/Vendor');
 
 // @desc    Save search query
 // @route   POST /api/search/history
@@ -258,6 +260,140 @@ exports.trackRecommendationClick = async (req, res, next) => {
     });
   } catch (error) {
     next(error);
+  }
+};
+
+function parsePagination(query) {
+  const page = Math.max(1, parseInt(query.page, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(query.limit, 10) || 12));
+  return { page, limit, skip: (page - 1) * limit };
+}
+
+function getSort(sort, hasQuery) {
+  if (sort === 'price_asc') return { price: 1, createdAt: -1 };
+  if (sort === 'price_desc') return { price: -1, createdAt: -1 };
+  if (sort === 'newest') return { createdAt: -1 };
+  if (sort === 'rating_desc') return { ratingAvg: -1, ratingCount: -1 };
+  if (sort === 'trending') return { totalSales: -1, views: -1, createdAt: -1 };
+  if (hasQuery) return { score: { $meta: 'textScore' }, createdAt: -1 };
+  return { createdAt: -1 };
+}
+
+async function resolveCategory(category) {
+  if (!category) return null;
+  if (/^[a-f\d]{24}$/i.test(String(category))) return category;
+  const bySlug = await Category.findOne({ slug: String(category).toLowerCase() }).select('_id').lean();
+  if (bySlug?._id) return bySlug._id;
+  const byName = await Category.findOne({ name: { $regex: `^${String(category)}$`, $options: 'i' } }).select('_id').lean();
+  return byName?._id || null;
+}
+
+// @desc    Search products for discovery page
+// @route   GET /api/search/products
+// @access  Public
+exports.searchProductsDiscovery = async (req, res, next) => {
+  try {
+    const { page, limit, skip } = parsePagination(req.query);
+    const query = { status: 'PUBLISHED', isActive: true };
+    const q = String(req.query.q || '').trim();
+
+    if (q) query.$text = { $search: q.slice(0, 120) };
+
+    if (req.query.category) {
+      const categoryId = await resolveCategory(req.query.category);
+      if (!categoryId) {
+        return res.status(200).json({ success: true, data: [], total: 0, page, pages: 0, limit });
+      }
+      query.category = categoryId;
+    }
+
+    if (req.query.minPrice || req.query.maxPrice) {
+      query.price = {};
+      if (req.query.minPrice !== undefined) query.price.$gte = Number(req.query.minPrice);
+      if (req.query.maxPrice !== undefined) query.price.$lte = Number(req.query.maxPrice);
+    }
+
+    if (req.query.brand) {
+      query.brand = { $regex: String(req.query.brand).trim(), $options: 'i' };
+    }
+
+    if (req.query.location) {
+      const locationTerm = String(req.query.location).trim();
+      query.$or = [
+        { 'location.city': { $regex: locationTerm, $options: 'i' } },
+        { 'location.state': { $regex: locationTerm, $options: 'i' } },
+        { 'location.country': { $regex: locationTerm, $options: 'i' } },
+        { 'location.serviceArea': { $regex: locationTerm, $options: 'i' } }
+      ];
+    }
+
+    if (req.query.minRating !== undefined && req.query.minRating !== '') {
+      query.ratingAvg = { $gte: Number(req.query.minRating) };
+    }
+
+    const projection = q ? { score: { $meta: 'textScore' } } : {};
+    const sort = getSort(req.query.sort, Boolean(q));
+
+    const [products, total] = await Promise.all([
+      Product.find(query, projection)
+        .select('-costPrice -reports -activityLogs')
+        .populate('vendor', 'storeName slug logo location')
+        .populate('category', 'name slug')
+        .sort(sort)
+        .skip(skip)
+        .limit(limit),
+      Product.countDocuments(query)
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data: products,
+      total,
+      page,
+      limit,
+      pages: Math.ceil(total / limit)
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+// @desc    Autocomplete suggestions
+// @route   GET /api/search/autocomplete?q=
+// @access  Public
+exports.autocomplete = async (req, res, next) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (!q || q.length < 2) {
+      return res.status(200).json({ success: true, data: [] });
+    }
+
+    const limit = Math.min(12, Math.max(8, parseInt(req.query.limit, 10) || 10));
+    const regex = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+
+    const [products, categories, vendors] = await Promise.all([
+      Product.find({ status: 'PUBLISHED', isActive: true, $or: [{ name: regex }, { title: regex }] })
+        .select('_id name title slug')
+        .limit(limit)
+        .lean(),
+      Category.find({ isActive: true, name: regex }).select('_id name slug').limit(limit).lean(),
+      Vendor.find({ status: 'approved', storeName: regex }).select('_id storeName slug').limit(limit).lean()
+    ]);
+
+    const suggestions = [];
+    for (const p of products) {
+      suggestions.push({ type: 'product', id: p._id, value: p.title || p.name, slug: p.slug });
+    }
+    for (const c of categories) {
+      suggestions.push({ type: 'category', id: c._id, value: c.name, slug: c.slug });
+    }
+    for (const v of vendors) {
+      suggestions.push({ type: 'vendor', id: v._id, value: v.storeName, slug: v.slug });
+    }
+
+    return res.status(200).json({ success: true, data: suggestions.slice(0, limit) });
+  } catch (error) {
+    return next(error);
   }
 };
 

@@ -10,10 +10,20 @@ const { botReply } = require('../utils/chatbot');
 const { getIO } = require('../socket');
 const { notifyAdmins } = require('../services/notificationService');
 const { buildAppUrl } = require('../utils/appUrl');
+const cloudinary = require('../utils/cloudinary');
 
 const URGENT_KEYWORDS = ['payment issue', 'fraud', 'dispute', 'chargeback', 'scam'];
 const AUTO_ESCALATE_AFTER_ATTEMPTS = 3;
-const ALLOWED_ATTACHMENT_MIME = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+const ALLOWED_ATTACHMENT_MIME = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'text/plain',
+  'video/mp4'
+];
 const HUMAN_SUPPORT_KEYWORDS = ['admin', 'human', 'agent', 'support', 'representative'];
 const ORDER_CONTEXT_KEYWORDS = ['order', 'delivery', 'tracking', 'refund', 'return', 'payment', 'vendor'];
 
@@ -175,6 +185,47 @@ async function createMessageAndBroadcast({ conversation, senderId, senderRole, m
 
   return message;
 }
+
+// POST /api/chat/attachments/upload
+exports.uploadChatAttachment = async (req, res, next) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'File is required' });
+    }
+
+    const folder = process.env.CHAT_ATTACHMENT_UPLOAD_FOLDER || 'nvm/chat/attachments';
+
+    const result = await new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          folder,
+          resource_type: 'auto',
+          use_filename: true,
+          unique_filename: true
+        },
+        (error, uploaded) => {
+          if (error) return reject(error);
+          return resolve(uploaded);
+        }
+      );
+
+      uploadStream.end(req.file.buffer);
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        url: result.secure_url,
+        public_id: result.public_id,
+        fileName: req.file.originalname,
+        mimeType: req.file.mimetype,
+        size: req.file.size
+      }
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
 
 // POST /api/chat/conversations
 exports.createConversation = async (req, res, next) => {

@@ -1,4 +1,4 @@
-﻿const mongoose = require('mongoose');
+const mongoose = require('mongoose');
 const Cart = require('../models/Cart');
 const Product = require('../models/Product');
 
@@ -20,6 +20,21 @@ function normalizeQty(value) {
     throw error;
   }
   return qty;
+}
+
+function resolveCartOwner(req) {
+  if (req.user?.id) {
+    return { userId: req.user.id, sessionId: null };
+  }
+
+  const sessionId = String(req.headers['x-session-id'] || req.query.sessionId || req.body?.sessionId || '').trim();
+  if (!sessionId) {
+    const error = new Error('sessionId is required for guest cart operations');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return { userId: null, sessionId };
 }
 
 async function ensurePurchasableProduct(productId) {
@@ -52,16 +67,21 @@ function mapProductSummary(product) {
   };
 }
 
-async function getOrCreateCart(userId) {
-  let cart = await Cart.findOne({ userId });
+async function getOrCreateCartByOwner({ userId = null, sessionId = null }) {
+  const query = userId ? { userId } : { sessionId };
+  let cart = await Cart.findOne(query);
   if (!cart) {
-    cart = await Cart.create({ userId, items: [] });
+    cart = await Cart.create({
+      userId: userId || null,
+      sessionId: userId ? null : sessionId,
+      items: []
+    });
   }
   return cart;
 }
 
-async function buildCartResponse(userId) {
-  const cart = await getOrCreateCart(userId);
+async function buildCartResponse(owner) {
+  const cart = await getOrCreateCartByOwner(owner);
   const productIds = cart.items.map((item) => item.productId);
 
   const products = productIds.length
@@ -109,6 +129,7 @@ async function buildCartResponse(userId) {
     data: {
       id: cart._id,
       userId: cart.userId,
+      sessionId: cart.sessionId || null,
       couponCode: cart.couponCode || '',
       itemCount,
       subtotal,
@@ -121,15 +142,20 @@ async function buildCartResponse(userId) {
 
 exports.getCart = async (req, res, next) => {
   try {
-    const payload = await buildCartResponse(req.user.id);
+    const owner = resolveCartOwner(req);
+    const payload = await buildCartResponse(owner);
     return res.status(200).json(payload);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
     return next(error);
   }
 };
 
 exports.addCartItem = async (req, res, next) => {
   try {
+    const owner = resolveCartOwner(req);
     const { productId, qty } = req.body || {};
     if (!productId) return res.status(400).json({ success: false, message: 'productId is required' });
 
@@ -140,7 +166,7 @@ exports.addCartItem = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Product is out of stock' });
     }
 
-    const cart = await getOrCreateCart(req.user.id);
+    const cart = await getOrCreateCartByOwner(owner);
     const idx = cart.items.findIndex((item) => String(item.productId) === String(productId));
 
     if (idx >= 0) {
@@ -169,7 +195,7 @@ exports.addCartItem = async (req, res, next) => {
     }
 
     await cart.save();
-    const payload = await buildCartResponse(req.user.id);
+    const payload = await buildCartResponse(owner);
     return res.status(200).json(payload);
   } catch (error) {
     if (error.statusCode) {
@@ -181,6 +207,7 @@ exports.addCartItem = async (req, res, next) => {
 
 exports.updateCartItem = async (req, res, next) => {
   try {
+    const owner = resolveCartOwner(req);
     const { productId, qty } = req.body || {};
     if (!productId) return res.status(400).json({ success: false, message: 'productId is required' });
 
@@ -191,7 +218,7 @@ exports.updateCartItem = async (req, res, next) => {
       return res.status(400).json({ success: false, message: `Only ${product.stock} item(s) available in stock` });
     }
 
-    const cart = await getOrCreateCart(req.user.id);
+    const cart = await getOrCreateCartByOwner(owner);
     const idx = cart.items.findIndex((item) => String(item.productId) === String(productId));
 
     if (idx < 0) {
@@ -204,7 +231,7 @@ exports.updateCartItem = async (req, res, next) => {
     cart.items[idx].imageSnapshot = product.images?.[0]?.url || '';
     await cart.save();
 
-    const payload = await buildCartResponse(req.user.id);
+    const payload = await buildCartResponse(owner);
     return res.status(200).json(payload);
   } catch (error) {
     if (error.statusCode) {
@@ -216,15 +243,16 @@ exports.updateCartItem = async (req, res, next) => {
 
 exports.removeCartItem = async (req, res, next) => {
   try {
+    const owner = resolveCartOwner(req);
     const { productId } = req.body || {};
     if (!productId) return res.status(400).json({ success: false, message: 'productId is required' });
     ensureProductId(productId);
 
-    const cart = await getOrCreateCart(req.user.id);
+    const cart = await getOrCreateCartByOwner(owner);
     cart.items = cart.items.filter((item) => String(item.productId) !== String(productId));
     await cart.save();
 
-    const payload = await buildCartResponse(req.user.id);
+    const payload = await buildCartResponse(owner);
     return res.status(200).json(payload);
   } catch (error) {
     if (error.statusCode) {
@@ -236,27 +264,35 @@ exports.removeCartItem = async (req, res, next) => {
 
 exports.clearCart = async (req, res, next) => {
   try {
-    const cart = await getOrCreateCart(req.user.id);
+    const owner = resolveCartOwner(req);
+    const cart = await getOrCreateCartByOwner(owner);
     cart.items = [];
     cart.couponCode = '';
     await cart.save();
 
-    const payload = await buildCartResponse(req.user.id);
+    const payload = await buildCartResponse(owner);
     return res.status(200).json(payload);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
     return next(error);
   }
 };
 
 exports.mergeCart = async (req, res, next) => {
   try {
+    if (!req.user?.id) {
+      return res.status(401).json({ success: false, message: 'Authentication required for merge' });
+    }
+
     const guestItems = Array.isArray(req.body?.items) ? req.body.items : [];
     if (!guestItems.length) {
-      const payload = await buildCartResponse(req.user.id);
+      const payload = await buildCartResponse({ userId: req.user.id, sessionId: null });
       return res.status(200).json(payload);
     }
 
-    const cart = await getOrCreateCart(req.user.id);
+    const cart = await getOrCreateCartByOwner({ userId: req.user.id, sessionId: null });
 
     for (const guestItem of guestItems) {
       const productId = guestItem.productId;
@@ -294,7 +330,7 @@ exports.mergeCart = async (req, res, next) => {
     }
 
     await cart.save();
-    const payload = await buildCartResponse(req.user.id);
+    const payload = await buildCartResponse({ userId: req.user.id, sessionId: null });
     return res.status(200).json(payload);
   } catch (error) {
     return next(error);

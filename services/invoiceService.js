@@ -157,10 +157,7 @@ async function createInvoiceDocument(payload, actorId) {
 }
 
 function shouldGenerateForOrder(order) {
-  const paymentStatus = normalizePaidStatus(order.paymentStatus);
-  if (paymentStatus === 'PAID') return true;
-  if (order.paymentMethod === 'cash-on-delivery') return true;
-  return false;
+  return Boolean(order);
 }
 
 async function issueInvoicesForOrder({ orderId, actorId = null, force = false }) {

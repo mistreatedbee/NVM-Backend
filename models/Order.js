@@ -17,6 +17,16 @@ function generateOrderNumber() {
   return `NVM${year}${month}${day}${ms}${random}`;
 }
 
+function normalizePaymentMethod(method) {
+  const value = String(method || '').trim().toUpperCase();
+  if (value === 'STRIPE') return 'stripe';
+  if (value === 'PAYFAST') return 'payfast';
+  if (value === 'COD') return 'cash-on-delivery';
+  if (value === 'EFT') return 'eft';
+  if (value === 'INVOICE') return 'INVOICE';
+  return method;
+}
+
 const orderItemSchema = new mongoose.Schema({
   product: {
     type: mongoose.Schema.Types.ObjectId,
@@ -154,12 +164,16 @@ const orderSchema = new mongoose.Schema({
   paymentMethod: {
     type: String,
     required: true,
-    enum: ['stripe', 'payfast', 'cash-on-delivery', 'eft', 'bank-transfer']
+    enum: ['stripe', 'payfast', 'cash-on-delivery', 'eft', 'bank-transfer', 'STRIPE', 'PAYFAST', 'COD', 'EFT', 'INVOICE']
   },
   paymentStatus: {
     type: String,
-    enum: ['pending', 'paid', 'failed', 'refunded', 'awaiting-confirmation', 'PENDING', 'PAID', 'FAILED', 'REFUNDED', 'AWAITING-CONFIRMATION'],
-    default: 'PENDING'
+    enum: [
+      'pending', 'paid', 'failed', 'refunded', 'awaiting-confirmation',
+      'PENDING', 'PAID', 'FAILED', 'REFUNDED', 'AWAITING-CONFIRMATION',
+      'AWAITING_PAYMENT', 'UNDER_REVIEW', 'REJECTED'
+    ],
+    default: 'AWAITING_PAYMENT'
   },
   paymentId: String,
   paidAt: Date,
@@ -340,6 +354,7 @@ orderSchema.pre('validate', function(next) {
   }
 
   this.paymentStatus = normalizePaymentStatus(this.paymentStatus);
+  this.paymentMethod = normalizePaymentMethod(this.paymentMethod);
 
   if (!this.deliveryMethod) {
     this.deliveryMethod = this.fulfillmentMethod === 'collection' ? 'PICKUP' : 'DELIVERY';

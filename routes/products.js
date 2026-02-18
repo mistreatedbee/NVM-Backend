@@ -15,6 +15,7 @@ const {
   searchProducts,
   getTrendingProducts
 } = require('../controllers/productController');
+const { getNewArrivals, getSimilarProducts } = require('../controllers/productDiscoveryController');
 const { getProductReviewsByProduct } = require('../controllers/reviewController');
 const { authenticate, isVendor, isAdmin, requireVerifiedEmail } = require('../middleware/auth');
 const { requireActiveVendorAccount } = require('../middleware/requireActiveVendorAccount');
@@ -42,6 +43,7 @@ router.get(
   searchProducts
 );
 router.get('/featured', getFeaturedProducts);
+router.get('/new', paginationValidation, validate, getNewArrivals);
 router.get(
   '/trending',
   paginationValidation,
@@ -50,6 +52,7 @@ router.get(
   getTrendingProducts
 );
 router.get('/slug/:slug', getProductBySlug);
+router.get('/:productId/similar', validateProductId, validate, getSimilarProducts);
 router.get('/vendor/:vendorId', validateVendorId, validate, paginationValidation, validate, getVendorProducts);
 router.get('/:productId/reviews', validateProductId, validate, paginationValidation, validate, getProductReviewsByProduct);
 router.get('/:productId/history', authenticate, validateProductId, validate, getProductHistory);

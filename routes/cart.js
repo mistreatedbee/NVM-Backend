@@ -1,5 +1,5 @@
 ﻿const express = require('express');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, optionalAuthenticate } = require('../middleware/auth');
 const {
   getCart,
   addCartItem,
@@ -11,13 +11,13 @@ const {
 
 const router = express.Router();
 
-router.use(authenticate);
+router.use(optionalAuthenticate);
 
 router.get('/', getCart);
 router.post('/add', addCartItem);
 router.post('/update', updateCartItem);
 router.post('/remove', removeCartItem);
 router.post('/clear', clearCart);
-router.post('/merge', mergeCart);
+router.post('/merge', authenticate, mergeCart);
 
 module.exports = router;

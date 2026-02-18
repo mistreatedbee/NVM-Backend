@@ -70,6 +70,20 @@ function normalizeOrder(orderDoc) {
   };
 }
 
+function getEtaText(order) {
+  const status = normalizeOrderStatus(order.orderStatus || order.status);
+  const deliveryMethod = order.deliveryMethod || (order.fulfillmentMethod === 'collection' ? 'PICKUP' : 'DELIVERY');
+  if (status === 'DELIVERED') return 'Delivered';
+  if (status === 'CANCELLED') return 'Cancelled';
+  if (deliveryMethod === 'PICKUP') {
+    if (status === 'PENDING' || status === 'PROCESSING') return 'Estimated ready for pickup: 1-2 business days';
+    return 'Ready for pickup soon';
+  }
+  if (status === 'PENDING' || status === 'PROCESSING') return 'Estimated delivery: 3-5 business days';
+  if (status === 'SHIPPED' || status === 'PARTIALLY_SHIPPED') return 'Estimated delivery: 1-3 business days';
+  return 'ETA unavailable';
+}
+
 function filterVendorItems(order, vendorId) {
   const normalized = normalizeOrder(order);
   const vendorItems = normalized.items.filter((item) => asString(item.vendorId) === asString(vendorId));
@@ -195,6 +209,7 @@ exports.getMyOrderTracking = async (req, res, next) => {
         orderId: order._id,
         orderNumber: order.orderNumber,
         orderStatus: normalizeOrderStatus(order.orderStatus || order.status),
+        etaText: getEtaText(order),
         items: normalizeOrder(order).items,
         timeline
       }
@@ -319,6 +334,12 @@ exports.updateVendorItemStatus = async (req, res, next) => {
     const order = await Order.findById(orderId);
     if (!order) {
       return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+    if (String(order.paymentStatus || '').toUpperCase() !== 'PAID') {
+      return res.status(400).json({
+        success: false,
+        message: 'Order cannot be fulfilled until payment is marked as PAID'
+      });
     }
 
     const item = findOrderItem(order, vendor._id, productId);

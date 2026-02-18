@@ -60,7 +60,6 @@ const onboardingGuideSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-onboardingGuideSchema.index({ slug: 1 }, { unique: true });
 onboardingGuideSchema.index({ status: 1, order: 1 });
 onboardingGuideSchema.index({ title: 'text', description: 'text' });
 

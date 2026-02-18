@@ -7,12 +7,16 @@ const {
   clearSearchHistory,
   generateRecommendations,
   getRecommendations,
-  trackRecommendationClick
+  trackRecommendationClick,
+  searchProductsDiscovery,
+  autocomplete
 } = require('../controllers/searchController');
 const { authenticate } = require('../middleware/auth');
 const { validateId, validate } = require('../middleware/validator');
 
 // Search history
+router.get('/products', searchProductsDiscovery);
+router.get('/autocomplete', autocomplete);
 router.post('/history', authenticate, saveSearch);
 router.get('/history', authenticate, getSearchHistory);
 router.delete('/history', authenticate, clearSearchHistory);

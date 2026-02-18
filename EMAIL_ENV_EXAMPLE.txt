@@ -26,3 +26,18 @@ KNOWLEDGE_RESOURCE_UPLOAD_FOLDER=nvm/knowledge/resources
 # Optional toggles for vendor management notifications/hooks
 VENDOR_ADMIN_EVENTS_EMAIL_ENABLED=true
 VENDOR_ADMIN_EVENTS_IN_APP_ENABLED=true
+
+# Payments
+PAYMENTS_ENABLED=false
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+PAYFAST_MERCHANT_ID=
+PAYFAST_MERCHANT_KEY=
+PAYFAST_PASSPHRASE=
+PAYFAST_BASE_URL=https://sandbox.payfast.co.za/eng/process
+PAYFAST_ITN_URL=
+PAYFAST_RETURN_URL=
+PAYFAST_CANCEL_URL=
+
+# Optional payment toggles
+ENABLE_COD=true

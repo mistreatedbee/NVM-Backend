@@ -2,6 +2,8 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
+const Dispute = require('../models/Dispute');
+const Vendor = require('../models/Vendor');
 
 function getTokenFromHandshake(socket) {
   const authHeader = socket.handshake.auth?.token || socket.handshake.headers?.authorization;
@@ -34,12 +36,25 @@ async function canAccessConversation(conversation, user) {
   return conversation.participantIds.some(id => id.toString() === user._id.toString());
 }
 
+async function canAccessDispute(dispute, user) {
+  if (!dispute || !user) return false;
+  if (user.role === 'admin') return true;
+  if (user.role === 'customer') return String(dispute.customer) === String(user._id);
+  if (user.role === 'vendor') {
+    const vendor = await Vendor.findOne({ user: user._id }).select('_id');
+    if (!vendor) return false;
+    return String(dispute.vendor) === String(vendor._id);
+  }
+  return false;
+}
+
 module.exports = (io) => {
   io.use(async (socket, next) => {
     try {
       const user = await resolveSocketUser(socket);
       socket.user = user;
       socket.join(`user:${user._id.toString()}`);
+      socket.join(`role:${String(user.role || '').toLowerCase()}`);
       return next();
     } catch (error) {
       return next(new Error('Unauthorized socket connection'));
@@ -117,6 +132,29 @@ module.exports = (io) => {
       } catch (error) {
         socket.emit('chat:error', { message: 'Read update failed' });
       }
+    });
+
+    socket.on('dispute:join-thread', async ({ disputeId }) => {
+      try {
+        const dispute = await Dispute.findById(disputeId).select('_id customer vendor');
+        if (!dispute) {
+          return socket.emit('dispute:error', { message: 'Dispute not found' });
+        }
+
+        const allowed = await canAccessDispute(dispute, socket.user);
+        if (!allowed) {
+          return socket.emit('dispute:error', { message: 'Not authorized' });
+        }
+
+        socket.join(`dispute:${disputeId}`);
+        socket.emit('dispute:joined', { disputeId });
+      } catch (error) {
+        socket.emit('dispute:error', { message: error.message || 'Join failed' });
+      }
+    });
+
+    socket.on('dispute:leave-thread', ({ disputeId }) => {
+      socket.leave(`dispute:${disputeId}`);
     });
   });
 };

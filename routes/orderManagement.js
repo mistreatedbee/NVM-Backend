@@ -30,8 +30,8 @@ const upload = multer({
 router.post('/:orderId/payment-proof', authenticate, validateId, validate, upload.single('paymentProof'), uploadPaymentProof);
 
 // Vendor/Admin routes
-router.put('/:orderId/confirm-payment', authenticate, validateId, validate, confirmPayment);
-router.put('/:orderId/reject-payment', authenticate, validateId, validate, rejectPayment);
+router.put('/:orderId/confirm-payment', authenticate, isAdmin, validateId, validate, confirmPayment);
+router.put('/:orderId/reject-payment', authenticate, isAdmin, validateId, validate, rejectPayment);
 router.put('/:orderId/status', authenticate, validateId, validate, updateOrderStatus);
 router.post('/:orderId/tracking-location', authenticate, validateId, validate, updateTrackingLocation);
 

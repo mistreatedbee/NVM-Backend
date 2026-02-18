@@ -33,7 +33,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-session-id']
 }));
 
 app.use(express.json({ limit: '10mb' }));
@@ -80,13 +80,22 @@ const trackingRoutes = require('./routes/tracking');
 const adminDashboardRoutes = require('./routes/adminDashboard');
 const vendorDashboardRoutes = require('./routes/vendorDashboard');
 const wishlistRoutes = require('./routes/wishlist');
+const wishlistsRoutes = require('./routes/wishlists');
 const cartRoutes = require('./routes/cart');
 const recentlyViewedRoutes = require('./routes/recentlyViewed');
+const recommendationsRoutes = require('./routes/recommendations');
+const alertsRoutes = require('./routes/alerts');
+const addressesRoutes = require('./routes/addresses');
+const checkoutRoutes = require('./routes/checkout');
+const productQaRoutes = require('./routes/productQa');
 const adminControlRoutes = require('./routes/adminControl');
 const helpRoutes = require('./routes/help');
 const supportRoutes = require('./routes/support');
 const adminHelpRoutes = require('./routes/adminHelp');
 const adminSupportRoutes = require('./routes/adminSupport');
+const adminReturnsRoutes = require('./routes/adminReturns');
+const adminPaymentProofRoutes = require('./routes/adminPaymentProofs');
+const disputeRoutes = require('./routes/disputes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -112,6 +121,8 @@ app.use('/api/admin', adminDashboardRoutes);
 app.use('/api/admin', adminControlRoutes);
 app.use('/api/admin', adminHelpRoutes);
 app.use('/api/admin', adminSupportRoutes);
+app.use('/api/admin', adminReturnsRoutes);
+app.use('/api/admin', adminPaymentProofRoutes);
 app.use('/api/vendor', vendorDocumentsRoutes);
 app.use('/api/vendor', vendorProductsRoutes);
 app.use('/api/vendor', vendorOrdersRoutes);
@@ -132,8 +143,15 @@ app.use('/api/support', supportRoutes);
 app.use('/api/posts', postsRoutes);
 app.use('/api/track', trackingRoutes);
 app.use('/api/wishlist', wishlistRoutes);
+app.use('/api/wishlists', wishlistsRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/recently-viewed', recentlyViewedRoutes);
+app.use('/api/recommendations', recommendationsRoutes);
+app.use('/api/alerts', alertsRoutes);
+app.use('/api/addresses', addressesRoutes);
+app.use('/api/checkout', checkoutRoutes);
+app.use('/api/disputes', disputeRoutes);
+app.use('/api', productQaRoutes);
 app.use('/debug', debugRoutes);
 
 app.get('/api/health', (req, res) => {

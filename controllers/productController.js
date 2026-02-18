@@ -7,6 +7,7 @@ const ProductAnalyticsEvent = require('../models/ProductAnalyticsEvent');
 const { notifyAdmins, notifyUser } = require('../services/notificationService');
 const { logActivity, logAudit, resolveIp } = require('../services/loggingService');
 const { detectProhibitedKeywords } = require('../utils/prohibitedRules');
+const { triggerPriceDropAlerts, triggerBackInStockAlerts } = require('../services/productAlertService');
 
 const PRODUCT_STATUS = {
   DRAFT: 'DRAFT',
@@ -21,7 +22,8 @@ const VENDOR_CAN_REPUBLISH = String(process.env.VENDOR_CAN_REPUBLISH || 'false')
 const VENDOR_EDITABLE_FIELDS = [
   'name', 'description', 'shortDescription', 'productType', 'category', 'subcategory', 'tags',
   'price', 'compareAtPrice', 'costPrice', 'sku', 'stock', 'trackInventory', 'lowStockThreshold',
-  'variants', 'images', 'digitalFile', 'serviceDetails', 'shipping', 'seo'
+  'variants', 'images', 'digitalFile', 'serviceDetails', 'shipping', 'seo',
+  'brand', 'location', 'specifications'
 ];
 
 const VENDOR_EDITABLE_WHEN_PUBLISHED = ['description', 'shortDescription', 'tags', 'images', 'seo'];
@@ -430,6 +432,8 @@ exports.updateProduct = async (req, res, next) => {
   try {
     const product = await Product.findById(req.params.productId || req.params.id);
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
+    const previousPrice = product.price;
+    const previousStock = product.stock;
 
     const isOwner = await canVendorAccessProduct(product, req.user.id);
     if (!isOwner && req.user.role !== 'admin') {
@@ -452,6 +456,10 @@ exports.updateProduct = async (req, res, next) => {
       product.lastEditedAt = new Date();
       product.lastEditedBy = req.user.id;
       await product.save();
+      await Promise.all([
+        triggerPriceDropAlerts({ product, oldPrice: previousPrice, newPrice: product.price }),
+        triggerBackInStockAlerts({ product, oldStock: previousStock, newStock: product.stock })
+      ]);
 
       await createHistory({
         productId: product._id,
@@ -475,6 +483,10 @@ exports.updateProduct = async (req, res, next) => {
     product.lastEditedAt = new Date();
     product.lastEditedBy = req.user.id;
     await product.save();
+    await Promise.all([
+      triggerPriceDropAlerts({ product, oldPrice: previousPrice, newPrice: product.price }),
+      triggerBackInStockAlerts({ product, oldStock: previousStock, newStock: product.stock })
+    ]);
 
     await createHistory({
       productId: product._id,

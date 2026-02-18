@@ -1,22 +1,44 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const crypto = require('crypto');
 const Order = require('../models/Order');
 const Transaction = require('../models/Transaction');
 const User = require('../models/User');
+const PaymentProof = require('../models/PaymentProof');
 const { notifyUser } = require('../services/notificationService');
 const { buildAppUrl } = require('../utils/appUrl');
 const { issueInvoicesForOrder } = require('../services/invoiceService');
 const { recordPurchaseEventsForOrder } = require('../services/productAnalyticsService');
+
+const ONLINE_PAYMENTS_ENABLED = String(process.env.PAYMENTS_ENABLED || 'false').toLowerCase() === 'true';
+
+function rejectWhenOnlineDisabled(res) {
+  return res.status(503).json({
+    success: false,
+    message: 'Online payment gateways are disabled. Please use Invoice Payment (Manual EFT).'
+  });
+}
 
 // @desc    Create payment intent (Stripe)
 // @route   POST /api/payments/create-intent
 // @access  Private
 exports.createPaymentIntent = async (req, res, next) => {
   try {
-    const { amount, orderId } = req.body;
+    if (!ONLINE_PAYMENTS_ENABLED) return rejectWhenOnlineDisabled(res);
+    const { orderId } = req.body;
+    if (!orderId) return res.status(400).json({ success: false, message: 'orderId is required' });
+    const order = await Order.findById(orderId).select('_id total customer customerId paymentStatus');
+    if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
+    const customerId = String(order.customerId || order.customer);
+    if (customerId !== String(req.user.id) && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+    if (String(order.paymentStatus).toUpperCase() === 'PAID') {
+      return res.status(400).json({ success: false, message: 'Order is already paid' });
+    }
 
     // Create payment intent
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(amount * 100), // Convert to cents
+      amount: Math.round(Number(order.total) * 100), // Convert to cents
       currency: 'usd',
       metadata: {
         orderId,
@@ -34,11 +56,136 @@ exports.createPaymentIntent = async (req, res, next) => {
   }
 };
 
+// @desc    Create PayFast payment redirect URL
+// @route   POST /api/payments/payfast/initiate
+// @access  Private
+exports.initiatePayFastPayment = async (req, res, next) => {
+  try {
+    if (!ONLINE_PAYMENTS_ENABLED) return rejectWhenOnlineDisabled(res);
+    const { orderId } = req.body || {};
+    if (!orderId) return res.status(400).json({ success: false, message: 'orderId is required' });
+    const order = await Order.findById(orderId).select('_id orderNumber total customer customerId paymentStatus');
+    if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
+
+    const customerId = String(order.customerId || order.customer);
+    if (customerId !== String(req.user.id) && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    const merchantId = process.env.PAYFAST_MERCHANT_ID;
+    const merchantKey = process.env.PAYFAST_MERCHANT_KEY;
+    const passphrase = process.env.PAYFAST_PASSPHRASE || '';
+    const baseUrl = process.env.PAYFAST_BASE_URL || 'https://sandbox.payfast.co.za/eng/process';
+    if (!merchantId || !merchantKey) {
+      return res.status(503).json({ success: false, message: 'PayFast is not configured' });
+    }
+
+    const notifyUrl = process.env.PAYFAST_ITN_URL;
+    const returnUrl = process.env.PAYFAST_RETURN_URL;
+    const cancelUrl = process.env.PAYFAST_CANCEL_URL;
+
+    const payload = {
+      merchant_id: merchantId,
+      merchant_key: merchantKey,
+      return_url: returnUrl,
+      cancel_url: cancelUrl,
+      notify_url: notifyUrl,
+      name_first: req.user.name || 'Customer',
+      email_address: req.user.email || '',
+      m_payment_id: String(order._id),
+      amount: Number(order.total).toFixed(2),
+      item_name: `Order ${order.orderNumber}`
+    };
+
+    const querystring = Object.entries(payload)
+      .filter(([, value]) => value !== undefined && value !== null && value !== '')
+      .map(([key, value]) => `${key}=${encodeURIComponent(String(value).trim())}`)
+      .join('&');
+
+    const signatureBase = passphrase ? `${querystring}&passphrase=${encodeURIComponent(passphrase)}` : querystring;
+    const signature = crypto.createHash('md5').update(signatureBase).digest('hex');
+    const redirectUrl = `${baseUrl}?${querystring}&signature=${signature}`;
+
+    return res.status(200).json({ success: true, data: { redirectUrl } });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+// @desc    PayFast ITN callback
+// @route   POST /api/payments/payfast/itn
+// @access  Public
+exports.payfastITN = async (req, res, next) => {
+  try {
+    if (!ONLINE_PAYMENTS_ENABLED) return res.status(503).send('Online payments disabled');
+    const orderId = req.body?.m_payment_id;
+    const paymentStatus = String(req.body?.payment_status || '').toUpperCase();
+    if (!orderId) return res.status(400).send('Missing m_payment_id');
+
+    const order = await Order.findById(orderId);
+    if (!order) return res.status(404).send('Order not found');
+
+    if (paymentStatus === 'COMPLETE') {
+      order.paymentStatus = 'PAID';
+      order.paymentMethod = 'PAYFAST';
+      order.paidAt = new Date();
+      if (String(order.orderStatus || '').toUpperCase() === 'PENDING') {
+        order.orderStatus = 'PROCESSING';
+        order.status = 'processing';
+      }
+      await order.save();
+    } else if (paymentStatus === 'FAILED' || paymentStatus === 'CANCELLED') {
+      order.paymentStatus = 'FAILED';
+      await order.save();
+    }
+
+    return res.status(200).send('OK');
+  } catch (error) {
+    return next(error);
+  }
+};
+
+// @desc    Save EFT payment proof metadata
+// @route   POST /api/payments/eft/proof
+// @access  Private
+exports.saveEftProof = async (req, res, next) => {
+  try {
+    if (!ONLINE_PAYMENTS_ENABLED) return rejectWhenOnlineDisabled(res);
+    const { orderId, fileUrl } = req.body || {};
+    if (!orderId || !fileUrl) return res.status(400).json({ success: false, message: 'orderId and fileUrl are required' });
+    const order = await Order.findById(orderId).select('_id customer customerId paymentMethod');
+    if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
+
+    const customerId = String(order.customerId || order.customer);
+    if (customerId !== String(req.user.id) && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    const proof = await PaymentProof.create({
+      orderId: order._id,
+      customerId: req.user.id,
+      fileUrl,
+      fileName: 'uploaded-proof',
+      mimeType: 'application/octet-stream',
+      size: 1,
+      status: 'UNDER_REVIEW',
+      uploadedAt: new Date()
+    });
+
+    order.paymentStatus = 'UNDER_REVIEW';
+    await order.save();
+    return res.status(201).json({ success: true, data: proof });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 // @desc    Confirm payment
 // @route   POST /api/payments/confirm
 // @access  Private
 exports.confirmPayment = async (req, res, next) => {
   try {
+    if (!ONLINE_PAYMENTS_ENABLED) return rejectWhenOnlineDisabled(res);
     const { paymentIntentId, orderId } = req.body;
 
     // Retrieve payment intent
@@ -140,6 +287,7 @@ exports.confirmPayment = async (req, res, next) => {
 // @route   POST /api/payments/webhook
 // @access  Public
 exports.stripeWebhook = async (req, res, next) => {
+  if (!ONLINE_PAYMENTS_ENABLED) return res.status(503).json({ success: false, message: 'Online payments disabled' });
   const sig = req.headers['stripe-signature'];
 
   let event;
@@ -184,7 +332,7 @@ exports.stripeWebhook = async (req, res, next) => {
 // @access  Private
 exports.getPaymentMethods = async (req, res, next) => {
   try {
-    const methods = [
+    const methods = ONLINE_PAYMENTS_ENABLED ? [
       {
         id: 'stripe',
         name: 'Credit/Debit Card',
@@ -206,6 +354,14 @@ exports.getPaymentMethods = async (req, res, next) => {
         enabled: true,
         icon: '/payment-icons/cash.svg'
       }
+    ] : [
+      {
+        id: 'invoice',
+        name: 'Pay via Invoice (Manual EFT)',
+        type: 'offline',
+        enabled: true,
+        icon: '/payment-icons/invoice.svg'
+      }
     ];
 
     res.status(200).json({
@@ -222,6 +378,7 @@ exports.getPaymentMethods = async (req, res, next) => {
 // @access  Private (Admin)
 exports.requestRefund = async (req, res, next) => {
   try {
+    if (!ONLINE_PAYMENTS_ENABLED) return rejectWhenOnlineDisabled(res);
     const { orderId, amount, reason } = req.body;
 
     const order = await Order.findById(orderId);

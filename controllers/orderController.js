@@ -6,12 +6,21 @@ const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const AuditLog = require('../models/AuditLog');
 const OrderStatusHistory = require('../models/OrderStatusHistory');
+const Invoice = require('../models/Invoice');
 const User = require('../models/User');
+const PromoCode = require('../models/PromoCode');
+const GiftCard = require('../models/GiftCard');
 const { notifyUser } = require('../services/notificationService');
 const { buildAppUrl } = require('../utils/appUrl');
 const { issueInvoicesForOrder } = require('../services/invoiceService');
 const { recordPurchaseEventsForOrder } = require('../services/productAnalyticsService');
 const { logActivity, resolveIp } = require('../services/loggingService');
+
+function calculatePromoDiscount(subtotal, promo) {
+  if (!promo) return 0;
+  if (promo.discountType === 'PERCENT') return Math.max(0, Math.min(subtotal, (subtotal * promo.amount) / 100));
+  return Math.max(0, Math.min(subtotal, promo.amount));
+}
 
 // @desc    Create new order
 // @route   POST /api/orders
@@ -23,8 +32,19 @@ exports.createOrder = async (req, res, next) => {
       shippingAddress,
       billingAddress,
       paymentMethod,
-      customerNotes
+      customerNotes,
+      promoCode,
+      giftCardCode,
+      deliveryMethod
     } = req.body;
+
+    const requestedPaymentMethod = String(paymentMethod || 'INVOICE').toUpperCase();
+    if (!['INVOICE', 'EFT'].includes(requestedPaymentMethod)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Only Pay via Invoice (Manual EFT) is currently available'
+      });
+    }
 
     // Validate items and calculate totals
     let subtotal = 0;
@@ -83,7 +103,37 @@ exports.createOrder = async (req, res, next) => {
     }
 
     const tax = subtotal * 0.1; // 10% tax
-    const total = subtotal + shippingCost + tax;
+    let discount = 0;
+
+    let promoDoc = null;
+    if (promoCode) {
+      promoDoc = await PromoCode.findOne({ code: String(promoCode).trim().toUpperCase(), active: true });
+      if (!promoDoc) return res.status(400).json({ success: false, message: 'Promo code is invalid' });
+      if (promoDoc.expiresAt && promoDoc.expiresAt < new Date()) {
+        return res.status(400).json({ success: false, message: 'Promo code has expired' });
+      }
+      if (promoDoc.maxUses > 0 && promoDoc.usedCount >= promoDoc.maxUses) {
+        return res.status(400).json({ success: false, message: 'Promo code usage limit reached' });
+      }
+      if (subtotal < (promoDoc.minSpend || 0)) {
+        return res.status(400).json({ success: false, message: `Promo requires minimum spend of ${promoDoc.minSpend}` });
+      }
+      discount += calculatePromoDiscount(subtotal, promoDoc);
+    }
+
+    let giftCardDoc = null;
+    let giftCardApplied = 0;
+    if (giftCardCode) {
+      giftCardDoc = await GiftCard.findOne({ code: String(giftCardCode).trim().toUpperCase(), active: true });
+      if (!giftCardDoc) return res.status(400).json({ success: false, message: 'Gift card is invalid' });
+      if (giftCardDoc.expiresAt && giftCardDoc.expiresAt < new Date()) {
+        return res.status(400).json({ success: false, message: 'Gift card has expired' });
+      }
+      giftCardApplied = Math.min(giftCardDoc.balance, Math.max(0, subtotal + shippingCost + tax - discount));
+      discount += giftCardApplied;
+    }
+
+    const total = Math.max(0, subtotal + shippingCost + tax - discount);
 
     // Create order
     const order = await Order.create({
@@ -94,22 +144,33 @@ exports.createOrder = async (req, res, next) => {
       shippingCost,
       deliveryFee: shippingCost,
       tax,
+      discount,
       total,
       shippingAddress,
       deliveryAddress: shippingAddress,
       billingAddress: billingAddress || shippingAddress,
-      paymentMethod,
-      paymentStatus: 'PENDING',
+      paymentMethod: 'INVOICE',
+      paymentStatus: 'AWAITING_PAYMENT',
       orderStatus: 'PENDING',
-      deliveryMethod: 'DELIVERY',
+      deliveryMethod: String(deliveryMethod || 'DELIVERY').toUpperCase() === 'PICKUP' ? 'PICKUP' : 'DELIVERY',
       totals: {
         subtotal,
         delivery: shippingCost,
-        discount: 0,
+        discount,
         total
       },
       customerNotes
     });
+
+    if (promoDoc) {
+      promoDoc.usedCount += 1;
+      await promoDoc.save();
+    }
+    if (giftCardDoc && giftCardApplied > 0) {
+      giftCardDoc.balance = Number(Math.max(0, giftCardDoc.balance - giftCardApplied).toFixed(2));
+      if (giftCardDoc.balance <= 0) giftCardDoc.active = false;
+      await giftCardDoc.save();
+    }
 
     await logActivity({
       userId: req.user.id,
@@ -126,9 +187,7 @@ exports.createOrder = async (req, res, next) => {
       userAgent: req.headers['user-agent'] || ''
     });
 
-    if (paymentMethod === 'cash-on-delivery') {
-      await issueInvoicesForOrder({ orderId: order._id, actorId: req.user.id, force: true });
-    }
+    await issueInvoicesForOrder({ orderId: order._id, actorId: req.user.id, force: true });
 
     await OrderStatusHistory.create({
       orderId: order._id,
@@ -289,9 +348,11 @@ exports.createOrder = async (req, res, next) => {
       }
     }
 
+    const invoices = await Invoice.find({ orderId: order._id }).select('_id invoiceNumber type issuedAt').lean();
     res.status(201).json({
       success: true,
-      data: order
+      data: order,
+      invoices
     });
   } catch (error) {
     next(error);

@@ -91,19 +91,13 @@ exports.uploadPaymentProof = async (req, res, next) => {
 // @access  Private (Vendor/Admin)
 exports.confirmPayment = async (req, res, next) => {
   try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Only admin can confirm payments' });
+    }
     const order = await Order.findById(req.params.orderId).populate('items.vendor');
 
     if (!order) {
       return res.status(404).json({ success: false, message: 'Order not found' });
-    }
-
-    // Check authorization - must be vendor of one of the items or admin
-    const isVendor = order.items.some(item => 
-      item.vendor && item.vendor.user && item.vendor.user.toString() === req.user.id
-    );
-
-    if (req.user.role !== 'admin' && !isVendor) {
-      return res.status(403).json({ success: false, message: 'Not authorized' });
     }
 
     if (order.paymentStatus === 'paid') {
@@ -155,6 +149,9 @@ exports.confirmPayment = async (req, res, next) => {
 // @access  Private (Vendor/Admin)
 exports.rejectPayment = async (req, res, next) => {
   try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Only admin can reject payments' });
+    }
     const { reason } = req.body;
 
     if (!reason) {
@@ -167,24 +164,12 @@ exports.rejectPayment = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    // Check authorization
-    const isVendor = order.items.some(item => 
-      item.vendor && item.vendor.user && item.vendor.user.toString() === req.user.id
-    );
-
-    if (req.user.role !== 'admin' && !isVendor) {
-      return res.status(403).json({ success: false, message: 'Not authorized' });
-    }
-
     order.paymentStatus = 'failed';
     order.paymentRejectionReason = reason;
     order.paymentConfirmedBy = req.user.id;
     order.paymentConfirmedAt = new Date();
 
     await order.save();
-    if (status === 'confirmed') {
-      await recordPurchaseEventsForOrder({ order, source: 'DIRECT', actorUserId: req.user.id });
-    }
 
     const customer = await User.findById(order.customer).select('name email role');
     if (customer) {
@@ -235,6 +220,14 @@ exports.updateOrderStatus = async (req, res, next) => {
 
     if (req.user.role !== 'admin' && !isVendor) {
       return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    const isPaid = String(order.paymentStatus || '').toUpperCase() === 'PAID';
+    if (req.user.role !== 'admin' && !isPaid) {
+      return res.status(400).json({
+        success: false,
+        message: 'Order cannot be fulfilled until payment is marked as PAID'
+      });
     }
 
     order.status = status;
