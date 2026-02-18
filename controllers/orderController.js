@@ -12,11 +12,14 @@ const PromoCode = require('../models/PromoCode');
 const GiftCard = require('../models/GiftCard');
 const VendorCoupon = require('../models/VendorCoupon');
 const FlashSale = require('../models/FlashSale');
+const ReferralEvent = require('../models/ReferralEvent');
 const { notifyUser } = require('../services/notificationService');
 const { buildAppUrl } = require('../utils/appUrl');
 const { issueInvoicesForOrder } = require('../services/invoiceService');
 const { recordPurchaseEventsForOrder } = require('../services/productAnalyticsService');
 const { logActivity, resolveIp } = require('../services/loggingService');
+const { evaluateFraudRules } = require('../services/trustSafetyService');
+const { calculateDeliveryFee } = require('../services/logisticsService');
 
 function calculatePromoDiscount(subtotal, promo) {
   if (!promo) return 0;
@@ -104,10 +107,6 @@ exports.createOrder = async (req, res, next) => {
       const vendorKey = String(product.vendor);
       vendorSubtotals.set(vendorKey, (vendorSubtotals.get(vendorKey) || 0) + itemSubtotal);
       
-      if (!product.shipping.freeShipping) {
-        shippingCost += product.shipping.shippingCost || 0;
-      }
-
       orderItems.push({
         product: product._id,
         productId: product._id,
@@ -126,6 +125,23 @@ exports.createOrder = async (req, res, next) => {
         status: 'PENDING',
         updatedAt: new Date()
       });
+    }
+
+    const quote = await calculateDeliveryFee({
+      customerAddress: shippingAddress || {},
+      cartItems: orderItems.map((item) => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        price: item.price
+      }))
+    });
+
+    const selectedDeliveryMethod = String(deliveryMethod || 'DELIVERY').toUpperCase() === 'PICKUP' ? 'PICKUP' : 'DELIVERY';
+    if (selectedDeliveryMethod === 'DELIVERY') {
+      const deliveryOption = quote.options.find((option) => option.method === 'DELIVERY');
+      shippingCost = Number(deliveryOption?.fee || 0);
+    } else {
+      shippingCost = 0;
     }
 
     const tax = subtotal * 0.1; // 10% tax
@@ -198,7 +214,13 @@ exports.createOrder = async (req, res, next) => {
       paymentMethod: 'INVOICE',
       paymentStatus: 'AWAITING_PAYMENT',
       orderStatus: 'PENDING',
-      deliveryMethod: String(deliveryMethod || 'DELIVERY').toUpperCase() === 'PICKUP' ? 'PICKUP' : 'DELIVERY',
+      deliveryMethod: selectedDeliveryMethod,
+      fulfillmentMethod: selectedDeliveryMethod === 'PICKUP' ? 'collection' : 'delivery',
+      deliveryFeeBreakdown: quote.breakdown.map((item) => ({
+        vendorId: item.vendorId,
+        zoneId: item.zoneId || null,
+        fee: item.deliveryFee
+      })),
       totals: {
         subtotal,
         delivery: shippingCost,
@@ -206,6 +228,19 @@ exports.createOrder = async (req, res, next) => {
         total
       },
       customerNotes
+    });
+
+    await ReferralEvent.findOneAndUpdate(
+      { referredUserId: req.user.id, firstOrderId: null },
+      { firstOrderId: order._id },
+      { sort: { createdAt: -1 } }
+    );
+
+    await evaluateFraudRules({
+      entityType: 'ORDER',
+      entityId: order._id,
+      createdBy: req.user.id,
+      order
     });
 
     if (promoDoc) {
@@ -434,11 +469,11 @@ exports.getAllOrders = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      count: orders.length,
+      data: orders,
+      page,
+      limit,
       total,
-      pages: Math.ceil(total / limit),
-      currentPage: page,
-      data: orders
+      totalPages: Math.ceil(total / limit) || 1
     });
   } catch (error) {
     next(error);
@@ -509,11 +544,11 @@ exports.getMyOrders = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      count: orders.length,
+      data: orders,
+      page,
+      limit,
       total,
-      pages: Math.ceil(total / limit),
-      currentPage: page,
-      data: orders
+      totalPages: Math.ceil(total / limit) || 1
     });
   } catch (error) {
     next(error);
@@ -553,11 +588,11 @@ exports.getVendorOrders = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      count: orders.length,
+      data: orders,
+      page,
+      limit,
       total,
-      pages: Math.ceil(total / limit),
-      currentPage: page,
-      data: orders
+      totalPages: Math.ceil(total / limit) || 1
     });
   } catch (error) {
     next(error);

@@ -23,7 +23,7 @@ exports.createCategory = async (req, res, next) => {
 exports.getAllCategories = async (req, res, next) => {
   try {
     const categories = await Category.find({ isActive: true })
-      .sort('order name');
+      .sort('sortOrder order name');
 
     res.status(200).json({
       success: true,

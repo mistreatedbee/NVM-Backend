@@ -7,7 +7,7 @@ const SupportMessage = require('../models/SupportMessage');
 const Counter = require('../models/Counter');
 const Vendor = require('../models/Vendor');
 const AuditLog = require('../models/AuditLog');
-const cloudinary = require('../utils/cloudinary');
+const { uploadByType } = require('../utils/uploadAsset');
 const { createNotification, notifyAdmins, safeSendTemplateEmail } = require('../services/notificationService');
 
 const HELP_CATEGORIES = ['GENERAL', 'ORDERS', 'PAYMENTS', 'VENDORS', 'PRODUCTS', 'ACCOUNT', 'SECURITY', 'OTHER'];
@@ -312,29 +312,20 @@ exports.uploadSupportAttachment = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'File is required' });
     }
 
-    const folder = process.env.SUPPORT_ATTACHMENT_UPLOAD_FOLDER || 'nvm/support/attachments';
-
-    const result = await new Promise((resolve, reject) => {
-      const uploadStream = cloudinary.uploader.upload_stream(
-        {
-          folder,
-          resource_type: 'auto',
-          use_filename: true,
-          unique_filename: true
-        },
-        (error, uploaded) => {
-          if (error) return reject(error);
-          return resolve(uploaded);
-        }
-      );
-
-      uploadStream.end(req.file.buffer);
+    const result = await uploadByType({
+      file: req.file,
+      type: 'doc',
+      folder: process.env.SUPPORT_ATTACHMENT_UPLOAD_FOLDER || 'nvm/support/attachments',
+      resourceType: 'auto'
     });
+    if (!result) {
+      return res.status(400).json({ success: false, message: 'Invalid file upload' });
+    }
 
     return res.status(201).json({
       success: true,
       data: {
-        url: result.secure_url,
+        url: result.originalUrl,
         fileName: req.file.originalname,
         mimeType: req.file.mimetype,
         size: req.file.size

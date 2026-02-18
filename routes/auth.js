@@ -9,9 +9,13 @@ const {
   resendVerification,
   forgotPassword,
   resetPassword,
-  updateProfile
+  updateProfile,
+  setupTwoFactor,
+  verifyTwoFactor,
+  disableTwoFactor
 } = require('../controllers/authController');
 const { authenticate } = require('../middleware/auth');
+const { authLimiter } = require('../middleware/security');
 
 const resendVerificationLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -29,8 +33,8 @@ const forgotPasswordLimiter = rateLimit({
   message: { success: false, message: 'Too many password reset requests. Try again later.' }
 });
 
-router.post('/register', register);
-router.post('/login', login);
+router.post('/register', authLimiter, register);
+router.post('/login', authLimiter, login);
 router.get('/me', authenticate, getMe);
 router.post('/verify-email', verifyEmail);
 router.get('/verify-email/:token', verifyEmail);
@@ -39,6 +43,9 @@ router.post('/forgot-password', forgotPasswordLimiter, forgotPassword);
 router.post('/reset-password', resetPassword);
 router.put('/reset-password/:token', resetPassword);
 router.put('/profile', authenticate, updateProfile);
+router.post('/2fa/setup', authenticate, setupTwoFactor);
+router.post('/2fa/verify', authenticate, verifyTwoFactor);
+router.post('/2fa/disable', authenticate, disableTwoFactor);
 
 module.exports = router;
 

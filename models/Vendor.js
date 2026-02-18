@@ -124,6 +124,17 @@ const vendorSchema = new mongoose.Schema({
     lat: Number,
     lng: Number
   },
+  geoLocation: {
+    type: {
+      type: String,
+      enum: ['Point'],
+      default: 'Point'
+    },
+    coordinates: {
+      type: [Number],
+      default: undefined
+    }
+  },
   storePolicies: {
     shippingPolicy: String,
     returnsPolicy: String,
@@ -414,6 +425,7 @@ vendorSchema.index({ totalSales: -1 });
 vendorSchema.index({ verificationStatus: 1 });
 vendorSchema.index({ createdAt: -1 });
 vendorSchema.index({ 'location.city': 1, 'location.state': 1 });
+vendorSchema.index({ geoLocation: '2dsphere' });
 vendorSchema.index({ storeName: 'text', description: 'text' });
 vendorSchema.index({ 'documents.status': 1 });
 vendorSchema.index({ 'complianceChecks.status': 1 });
@@ -441,6 +453,12 @@ vendorSchema.pre('save', function(next) {
   }
 
   this.storeSlug = this.usernameSlug || this.slug;
+  if (this.location && Number.isFinite(this.location.lng) && Number.isFinite(this.location.lat)) {
+    this.geoLocation = {
+      type: 'Point',
+      coordinates: [Number(this.location.lng), Number(this.location.lat)]
+    };
+  }
 
   if (this.bankDetails) {
     if (!this.bankDetails.accountHolder && this.bankDetails.accountHolderName) {

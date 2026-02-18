@@ -12,13 +12,14 @@ const {
   vendorUnpublishProduct,
   vendorRepublishProduct
 } = require('../controllers/productController');
+const { enforceVendorPlanLimits } = require('../controllers/monetizationController');
 
 const VENDOR_CAN_UNPUBLISH = String(process.env.VENDOR_CAN_UNPUBLISH || 'false').toLowerCase() === 'true';
 const VENDOR_CAN_REPUBLISH = String(process.env.VENDOR_CAN_REPUBLISH || 'false').toLowerCase() === 'true';
 
 router.use(authenticate, isVendor, requireVerifiedEmail, requireActiveVendorAccount);
 
-router.post('/products', productValidation, validate, createProduct);
+router.post('/products', enforceVendorPlanLimits, productValidation, validate, createProduct);
 router.get('/products', paginationValidation, validate, getMyProducts);
 router.get('/products/:productId', validateProductId, validate, getVendorProductById);
 router.put('/products/:productId', validateProductId, validate, updateProduct);

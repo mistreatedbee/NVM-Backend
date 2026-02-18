@@ -1,11 +1,15 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const Vendor = require('../models/Vendor');
 
-exports.authenticate = async (req, res, next) => {
+function normalizeRole(role) {
+  return String(role || '').toUpperCase();
+}
+
+async function authenticate(req, res, next) {
   try {
-    // Get token from header
     const authHeader = req.headers.authorization;
-    
+
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({
         success: false,
@@ -61,9 +65,94 @@ exports.authenticate = async (req, res, next) => {
       message: 'Server error during authentication'
     });
   }
-};
+}
 
-exports.isAdmin = (req, res, next) => {
+function requireRole(...roles) {
+  const allowed = new Set(roles.map(normalizeRole));
+
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+    }
+
+    const userRole = normalizeRole(req.user.role);
+    if (!allowed.has(userRole)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied for this role'
+      });
+    }
+
+    return next();
+  };
+}
+
+async function requireVendorActive(req, res, next) {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+
+    if (String(req.user.role) === 'admin') {
+      return next();
+    }
+
+    if (String(req.user.role) !== 'vendor') {
+      return res.status(403).json({ success: false, message: 'Vendor privileges required' });
+    }
+
+    const vendor = await Vendor.findOne({ user: req.user.id }).select(
+      'vendorStatus status accountStatus suspensionReason rejectionReason'
+    );
+
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor profile not found'
+      });
+    }
+
+    const isActive = vendor.vendorStatus
+      ? vendor.vendorStatus === 'ACTIVE'
+      : vendor.status === 'approved' && vendor.accountStatus === 'active';
+
+    if (!isActive) {
+      return res.status(403).json({
+        success: false,
+        message: vendor.suspensionReason || vendor.rejectionReason || 'Vendor account is not active'
+      });
+    }
+
+    req.vendor = vendor;
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+}
+
+function requireOwner(paramName = 'id', field = '_id') {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+
+    if (String(req.user.role) === 'admin') return next();
+
+    const expected = String(req.params[paramName] || '');
+    const actual = String(req.user[field] || req.user._id || '');
+
+    if (!expected || !actual || expected !== actual) {
+      return res.status(403).json({ success: false, message: 'Forbidden: ownership check failed' });
+    }
+
+    return next();
+  };
+}
+
+function isAdmin(req, res, next) {
   if (req.user && req.user.role === 'admin') {
     next();
   } else {
@@ -72,9 +161,9 @@ exports.isAdmin = (req, res, next) => {
       message: 'Access denied. Admin privileges required.'
     });
   }
-};
+}
 
-exports.isVendor = (req, res, next) => {
+function isVendor(req, res, next) {
   if (req.user && (req.user.role === 'vendor' || req.user.role === 'admin')) {
     next();
   } else {
@@ -83,9 +172,9 @@ exports.isVendor = (req, res, next) => {
       message: 'Access denied. Vendor privileges required.'
     });
   }
-};
+}
 
-exports.isCustomer = (req, res, next) => {
+function isCustomer(req, res, next) {
   if (req.user) {
     next();
   } else {
@@ -94,9 +183,9 @@ exports.isCustomer = (req, res, next) => {
       message: 'Access denied. Please log in.'
     });
   }
-};
+}
 
-exports.optionalAuthenticate = async (req, res, next) => {
+async function optionalAuthenticate(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -116,9 +205,9 @@ exports.optionalAuthenticate = async (req, res, next) => {
   } catch (error) {
     return next();
   }
-};
+}
 
-exports.requireVerifiedEmail = (req, res, next) => {
+function requireVerifiedEmail(req, res, next) {
   if (req.user?.isVerified) {
     return next();
   }
@@ -127,5 +216,18 @@ exports.requireVerifiedEmail = (req, res, next) => {
     success: false,
     message: 'Verify your email before performing this action'
   });
+}
+
+module.exports = {
+  authenticate,
+  requireAuth: authenticate,
+  optionalAuthenticate,
+  requireRole,
+  requireVendorActive,
+  requireOwner,
+  isAdmin,
+  isVendor,
+  isCustomer,
+  requireVerifiedEmail
 };
 

@@ -1,65 +1,70 @@
 const cloudinary = require('cloudinary').v2;
 
-// Configure Cloudinary
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// Upload image
-exports.uploadImage = async (file, folder = 'nvm') => {
-  try {
-    const result = await cloudinary.uploader.upload(file.path, {
-      folder: folder,
-      resource_type: 'auto',
-      transformation: [
-        { width: 1200, height: 1200, crop: 'limit' },
-        { quality: 'auto' },
-        { fetch_format: 'auto' }
-      ]
+function ensureConfigured() {
+  if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+    throw new Error('Cloudinary is not configured. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET.');
+  }
+}
+
+function uploadFromBuffer(buffer, options = {}) {
+  ensureConfigured();
+
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(options, (error, result) => {
+      if (error) return reject(error);
+      return resolve(result);
     });
+    uploadStream.end(buffer);
+  });
+}
 
+function buildTransformedUrl(publicId, transformation = []) {
+  return cloudinary.url(publicId, {
+    secure: true,
+    fetch_format: 'auto',
+    quality: 'auto',
+    transformation
+  });
+}
+
+async function uploadAsset({ buffer, folder, resourceType = 'image', publicId, transformation }) {
+  const result = await uploadFromBuffer(buffer, {
+    folder,
+    resource_type: resourceType,
+    public_id: publicId,
+    overwrite: true,
+    transformation
+  });
+
+  if (resourceType !== 'image') {
     return {
-      public_id: result.public_id,
-      url: result.secure_url
+      publicId: result.public_id,
+      originalUrl: result.secure_url,
+      format: result.format,
+      bytes: result.bytes,
+      resourceType
     };
-  } catch (error) {
-    console.error('Cloudinary upload error:', error);
-    throw new Error('Image upload failed');
   }
-};
 
-// Upload multiple images
-exports.uploadMultipleImages = async (files, folder = 'nvm') => {
-  try {
-    const uploadPromises = files.map(file => this.uploadImage(file, folder));
-    return await Promise.all(uploadPromises);
-  } catch (error) {
-    console.error('Cloudinary multiple upload error:', error);
-    throw new Error('Images upload failed');
-  }
-};
+  return {
+    publicId: result.public_id,
+    originalUrl: buildTransformedUrl(result.public_id, [{ width: 1600, crop: 'limit' }]),
+    mediumUrl: buildTransformedUrl(result.public_id, [{ width: 800, crop: 'limit' }]),
+    thumbnailUrl: buildTransformedUrl(result.public_id, [{ width: 300, height: 300, crop: 'fill', gravity: 'auto' }]),
+    format: result.format,
+    bytes: result.bytes,
+    resourceType
+  };
+}
 
-// Delete image
-exports.deleteImage = async (publicId) => {
-  try {
-    await cloudinary.uploader.destroy(publicId);
-  } catch (error) {
-    console.error('Cloudinary delete error:', error);
-    throw new Error('Image deletion failed');
-  }
-};
-
-// Delete multiple images
-exports.deleteMultipleImages = async (publicIds) => {
-  try {
-    const deletePromises = publicIds.map(id => this.deleteImage(id));
-    await Promise.all(deletePromises);
-  } catch (error) {
-    console.error('Cloudinary multiple delete error:', error);
-    throw new Error('Images deletion failed');
-  }
-};
+cloudinary.uploadFromBuffer = uploadFromBuffer;
+cloudinary.uploadAsset = uploadAsset;
+cloudinary.buildTransformedUrl = buildTransformedUrl;
 
 module.exports = cloudinary;

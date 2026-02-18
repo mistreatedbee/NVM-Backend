@@ -8,7 +8,7 @@ const vendorDocumentSchema = new mongoose.Schema({
   },
   docType: {
     type: String,
-    enum: ['BUSINESS_REG', 'COMPLIANCE', 'ID', 'TAX', 'OTHER'],
+    enum: ['BUSINESS_REG', 'ID_DOC', 'PROOF_OF_ADDRESS', 'TAX', 'BANK_CONFIRMATION', 'OTHER', 'COMPLIANCE', 'ID'],
     required: true
   },
   fileName: {
@@ -34,8 +34,8 @@ const vendorDocumentSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['UPLOADED', 'APPROVED', 'REJECTED'],
-    default: 'UPLOADED'
+    enum: ['PENDING', 'UPLOADED', 'APPROVED', 'REJECTED'],
+    default: 'PENDING'
   },
   uploadedAt: {
     type: Date,
@@ -56,7 +56,18 @@ const vendorDocumentSchema = new mongoose.Schema({
 
 vendorDocumentSchema.index({ vendorId: 1 });
 vendorDocumentSchema.index({ status: 1 });
+vendorDocumentSchema.index({ vendorId: 1, status: 1 });
 vendorDocumentSchema.index({ docType: 1 });
 vendorDocumentSchema.index({ uploadedAt: -1 });
+vendorDocumentSchema.index({ status: 1, uploadedAt: -1 });
+
+vendorDocumentSchema.pre('save', function(next) {
+  if (this.status === 'UPLOADED') {
+    this.status = 'PENDING';
+  }
+  if (this.docType === 'COMPLIANCE') this.docType = 'PROOF_OF_ADDRESS';
+  if (this.docType === 'ID') this.docType = 'ID_DOC';
+  next();
+});
 
 module.exports = mongoose.model('VendorDocument', vendorDocumentSchema);

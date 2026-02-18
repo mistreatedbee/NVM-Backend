@@ -227,18 +227,10 @@ async function uploadDocumentToCloudinary(fileBuffer) {
     throw error;
   }
 
-  return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      {
-        folder: 'nvm/vendor-documents',
-        resource_type: 'auto'
-      },
-      (error, result) => {
-        if (error) return reject(error);
-        return resolve(result);
-      }
-    );
-    stream.end(fileBuffer);
+  return cloudinary.uploadAsset({
+    buffer: fileBuffer,
+    folder: 'nvm/docs/vendor-documents',
+    resourceType: 'auto'
   });
 }
 
@@ -616,8 +608,8 @@ exports.uploadVendorDocument = async (req, res, next) => {
       vendorId: vendor._id,
       docType,
       fileName: req.file.originalname,
-      fileUrl: uploadResult.secure_url,
-      storageKey: uploadResult.public_id,
+      fileUrl: uploadResult.originalUrl,
+      storageKey: uploadResult.publicId,
       mimeType: req.file.mimetype,
       size: req.file.size,
       status: 'UPLOADED',
