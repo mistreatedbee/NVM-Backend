@@ -34,6 +34,19 @@ const userSchema = new mongoose.Schema({
     enum: ['customer', 'vendor', 'admin'],
     default: 'customer'
   },
+  accountStatus: {
+    type: String,
+    enum: ['ACTIVE', 'SUSPENDED', 'BANNED'],
+    default: 'ACTIVE'
+  },
+  suspensionReason: {
+    type: String,
+    default: ''
+  },
+  banReason: {
+    type: String,
+    default: ''
+  },
   isVerified: {
     type: Boolean,
     default: false
@@ -67,10 +80,36 @@ const userSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Indexes for dashboard and admin filtering queries.
+userSchema.index({ role: 1, createdAt: -1 });
+userSchema.index({ role: 1, isActive: 1, createdAt: -1 });
+userSchema.index({ role: 1, accountStatus: 1, createdAt: -1 });
+
 // Encrypt password
 userSchema.pre('save', async function(next) {
+  if (!this.isModified('accountStatus')) {
+    if (this.isBanned) {
+      this.accountStatus = 'BANNED';
+    } else if (!this.isActive) {
+      this.accountStatus = 'SUSPENDED';
+    } else {
+      this.accountStatus = 'ACTIVE';
+    }
+  }
+
+  if (this.accountStatus === 'ACTIVE') {
+    this.isActive = true;
+    this.isBanned = false;
+  } else if (this.accountStatus === 'SUSPENDED') {
+    this.isActive = false;
+    this.isBanned = false;
+  } else if (this.accountStatus === 'BANNED') {
+    this.isActive = false;
+    this.isBanned = true;
+  }
+
   if (!this.isModified('password')) {
-    next();
+    return next();
   }
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
