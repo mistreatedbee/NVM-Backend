@@ -381,7 +381,7 @@ const vendorSchema = new mongoose.Schema({
 // Indexes
 vendorSchema.index({ status: 1 });
 vendorSchema.index({ accountStatus: 1 });
-vendorSchema.index({ vendorStatus: 1 });
+vendorSchema.index({ vendorStatus: 1, createdAt: -1 });
 vendorSchema.index({ category: 1 });
 vendorSchema.index({ rating: -1 });
 vendorSchema.index({ totalSales: -1 });

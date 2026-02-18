@@ -67,6 +67,10 @@ const userSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Indexes for dashboard and admin filtering queries.
+userSchema.index({ role: 1, createdAt: -1 });
+userSchema.index({ role: 1, isActive: 1, createdAt: -1 });
+
 // Encrypt password
 userSchema.pre('save', async function(next) {
   if (!this.isModified('password')) {

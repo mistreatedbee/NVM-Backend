@@ -278,6 +278,7 @@ productSchema.index({ vendorId: 1 });
 productSchema.index({ category: 1 });
 productSchema.index({ status: 1 });
 productSchema.index({ isActive: 1 });
+productSchema.index({ status: 1, isActive: 1, createdAt: -1 });
 productSchema.index({ price: 1 });
 productSchema.index({ rating: -1 });
 productSchema.index({ totalSales: -1 });
