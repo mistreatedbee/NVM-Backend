@@ -17,6 +17,11 @@ const productSchema = new mongoose.Schema({
     trim: true,
     maxlength: [200, 'Product name cannot be more than 200 characters']
   },
+  title: {
+    type: String,
+    trim: true,
+    maxlength: [200, 'Product title cannot be more than 200 characters']
+  },
   slug: {
     type: String,
     unique: true,
@@ -279,16 +284,21 @@ productSchema.index({ totalSales: -1 });
 productSchema.index({ createdAt: -1 });
 productSchema.index({ publishedAt: -1 });
 productSchema.index({ reportCount: -1 });
+productSchema.index({ status: 1, isActive: 1, category: 1, price: 1 });
+productSchema.index({ featured: 1, status: 1, isActive: 1 });
 productSchema.index({ 'reports.status': 1 });
-productSchema.index({ name: 'text', description: 'text', tags: 'text' });
+productSchema.index({ title: 'text', name: 'text', description: 'text' });
 
 // Generate slug before saving
 productSchema.pre('save', function(next) {
   if (this.isModified('name')) {
+    this.title = this.name;
     this.slug = this.name
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '') + '-' + Date.now();
+  } else if (this.isModified('title') && !this.isModified('name') && this.title) {
+    this.name = this.title;
   }
   next();
 });

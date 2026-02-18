@@ -1,8 +1,10 @@
 const Product = require('../models/Product');
 const Vendor = require('../models/Vendor');
 const User = require('../models/User');
+const Category = require('../models/Category');
 const ProductHistory = require('../models/ProductHistory');
 const AuditLog = require('../models/AuditLog');
+const ProductAnalyticsEvent = require('../models/ProductAnalyticsEvent');
 const { notifyAdmins, notifyUser } = require('../services/notificationService');
 
 const PRODUCT_STATUS = {
@@ -29,6 +31,44 @@ const FORBIDDEN_VENDOR_FIELDS = new Set([
 ]);
 
 const PUBLIC_PRODUCT_QUERY = { status: PRODUCT_STATUS.PUBLISHED, isActive: true };
+const PUBLIC_PRODUCT_EXCLUDE_FIELDS = '-costPrice -reports -activityLogs -rejectionReason -rejectedBy -publishedBy -lastEditedBy -rejectedAt';
+const trendingCache = new Map();
+const TRENDING_CACHE_TTL_MS = 15 * 60 * 1000;
+
+function parsePagination(query, defaults = { page: 1, limit: 12 }) {
+  const page = Math.max(1, parseInt(query.page, 10) || defaults.page);
+  const limit = Math.min(100, Math.max(1, parseInt(query.limit, 10) || defaults.limit));
+  return { page, limit, skip: (page - 1) * limit };
+}
+
+async function resolveCategoryFilter(categoryParam) {
+  if (!categoryParam) return null;
+  const value = String(categoryParam).trim();
+  if (!value) return null;
+  if (/^[a-f\d]{24}$/i.test(value)) {
+    return value;
+  }
+
+  const bySlug = await Category.findOne({ slug: value.toLowerCase(), isActive: true }).select('_id');
+  if (bySlug) return bySlug._id;
+
+  const byName = await Category.findOne({ name: { $regex: `^${value}$`, $options: 'i' }, isActive: true }).select('_id');
+  return byName?._id || null;
+}
+
+function getTrendingCache(key) {
+  const entry = trendingCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.createdAt > TRENDING_CACHE_TTL_MS) {
+    trendingCache.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+function setTrendingCache(key, value) {
+  trendingCache.set(key, { value, createdAt: Date.now() });
+}
 
 function actorRoleFromUser(user) {
   return user?.role === 'admin' ? 'ADMIN' : 'VENDOR';
@@ -269,31 +309,57 @@ exports.getAdminProductById = async (req, res, next) => {
   }
 };
 
+function buildPublicSort(sort, hasTextQuery) {
+  if (sort === 'price_asc' || sort === 'price-asc') return { price: 1, createdAt: -1 };
+  if (sort === 'price_desc' || sort === 'price-desc') return { price: -1, createdAt: -1 };
+  if (sort === 'newest') return { createdAt: -1 };
+  if (sort === 'rating_desc' || sort === 'rating') return { ratingAvg: -1, rating: -1, ratingCount: -1 };
+  if (sort === 'best_selling' || sort === 'popular') return { totalSales: -1, createdAt: -1 };
+  if (hasTextQuery) return { score: { $meta: 'textScore' }, createdAt: -1 };
+  return { createdAt: -1 };
+}
+
 exports.getAllProducts = async (req, res, next) => {
   try {
-    const page = parseInt(req.query.page, 10) || 1;
-    const limit = parseInt(req.query.limit, 10) || 12;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = parsePagination(req.query, { page: 1, limit: 12 });
     const query = { ...PUBLIC_PRODUCT_QUERY };
+    const q = String(req.query.search || '').trim();
 
-    if (req.query.category) query.category = req.query.category;
+    if (req.query.category) {
+      const categoryId = await resolveCategoryFilter(req.query.category);
+      if (categoryId) query.category = categoryId;
+      else return res.status(200).json({ success: true, count: 0, total: 0, pages: 0, currentPage: page, data: [] });
+    }
     if (req.query.vendor) query.vendor = req.query.vendor;
     if (req.query.type) query.productType = req.query.type;
     if (req.query.minPrice || req.query.maxPrice) {
       query.price = {};
-      if (req.query.minPrice) query.price.$gte = parseFloat(req.query.minPrice);
-      if (req.query.maxPrice) query.price.$lte = parseFloat(req.query.maxPrice);
+      if (req.query.minPrice !== undefined) {
+        const min = parseFloat(req.query.minPrice);
+        if (Number.isNaN(min) || min < 0) return res.status(400).json({ success: false, message: 'minPrice must be a non-negative number' });
+        query.price.$gte = min;
+      }
+      if (req.query.maxPrice !== undefined) {
+        const max = parseFloat(req.query.maxPrice);
+        if (Number.isNaN(max) || max < 0) return res.status(400).json({ success: false, message: 'maxPrice must be a non-negative number' });
+        query.price.$lte = max;
+      }
+      if (query.price.$gte !== undefined && query.price.$lte !== undefined && query.price.$gte > query.price.$lte) {
+        return res.status(400).json({ success: false, message: 'minPrice cannot be greater than maxPrice' });
+      }
     }
-    if (req.query.search) query.$text = { $search: req.query.search };
+    if (q) query.$text = { $search: q.slice(0, 120) };
 
-    let sort = '-createdAt';
-    if (req.query.sort === 'price-asc') sort = 'price';
-    else if (req.query.sort === 'price-desc') sort = '-price';
-    else if (req.query.sort === 'rating') sort = '-rating';
-    else if (req.query.sort === 'popular') sort = '-totalSales';
+    const sort = buildPublicSort(req.query.sort, Boolean(q));
 
     const [products, total] = await Promise.all([
-      Product.find(query).populate('vendor', 'storeName slug logo rating').populate('category', 'name slug').sort(sort).skip(skip).limit(limit),
+      Product.find(query)
+        .select(PUBLIC_PRODUCT_EXCLUDE_FIELDS)
+        .populate('vendor', 'storeName slug logo rating')
+        .populate('category', 'name slug')
+        .sort(sort)
+        .skip(skip)
+        .limit(limit),
       Product.countDocuments(query)
     ]);
 
@@ -312,7 +378,11 @@ exports.getProduct = async (req, res, next) => {
 
     product.views += 1;
     await product.save({ validateBeforeSave: false });
-    res.status(200).json({ success: true, data: product });
+    const sanitized = await Product.findById(product._id)
+      .select(PUBLIC_PRODUCT_EXCLUDE_FIELDS)
+      .populate('vendor', 'storeName slug logo rating totalReviews')
+      .populate('category', 'name slug');
+    res.status(200).json({ success: true, data: sanitized });
   } catch (error) {
     next(error);
   }
@@ -327,7 +397,11 @@ exports.getProductBySlug = async (req, res, next) => {
 
     product.views += 1;
     await product.save({ validateBeforeSave: false });
-    res.status(200).json({ success: true, data: product });
+    const sanitized = await Product.findById(product._id)
+      .select(PUBLIC_PRODUCT_EXCLUDE_FIELDS)
+      .populate('vendor', 'storeName slug logo rating totalReviews')
+      .populate('category', 'name slug');
+    res.status(200).json({ success: true, data: sanitized });
   } catch (error) {
     next(error);
   }
@@ -834,7 +908,7 @@ exports.getVendorProducts = async (req, res, next) => {
     const query = { vendor: req.params.vendorId, ...PUBLIC_PRODUCT_QUERY };
 
     const [products, total] = await Promise.all([
-      Product.find(query).populate('category', 'name slug').sort('-createdAt').skip(skip).limit(limit),
+      Product.find(query).select(PUBLIC_PRODUCT_EXCLUDE_FIELDS).populate('category', 'name slug').sort('-createdAt').skip(skip).limit(limit),
       Product.countDocuments(query)
     ]);
 
@@ -846,22 +920,179 @@ exports.getVendorProducts = async (req, res, next) => {
 
 exports.getFeaturedProducts = async (req, res, next) => {
   try {
-    const limit = parseInt(req.query.limit, 10) || 8;
-    let products = await Product.find({ featured: true, ...PUBLIC_PRODUCT_QUERY })
-      .populate('vendor', 'storeName slug logo')
-      .populate('category', 'name slug')
-      .sort('-rating -totalSales')
-      .limit(limit);
-
-    if (products.length === 0) {
-      products = await Product.find(PUBLIC_PRODUCT_QUERY)
+    const { page, limit, skip } = parsePagination(req.query, { page: 1, limit: 8 });
+    let [products, total] = await Promise.all([
+      Product.find({ featured: true, ...PUBLIC_PRODUCT_QUERY })
+        .select(PUBLIC_PRODUCT_EXCLUDE_FIELDS)
         .populate('vendor', 'storeName slug logo')
         .populate('category', 'name slug')
-        .sort('-rating -totalSales -createdAt')
-        .limit(limit);
+        .sort({ ratingAvg: -1, totalSales: -1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Product.countDocuments({ featured: true, ...PUBLIC_PRODUCT_QUERY })
+    ]);
+
+    if (products.length === 0 && page === 1) {
+      [products, total] = await Promise.all([
+        Product.find(PUBLIC_PRODUCT_QUERY)
+          .select(PUBLIC_PRODUCT_EXCLUDE_FIELDS)
+          .populate('vendor', 'storeName slug logo')
+          .populate('category', 'name slug')
+          .sort({ ratingAvg: -1, totalSales: -1, createdAt: -1 })
+          .limit(limit),
+        Product.countDocuments(PUBLIC_PRODUCT_QUERY)
+      ]);
     }
 
-    res.status(200).json({ success: true, count: products.length, data: products });
+    res.status(200).json({
+      success: true,
+      count: products.length,
+      total,
+      pages: Math.ceil(total / limit),
+      currentPage: page,
+      data: products
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.searchProducts = async (req, res, next) => {
+  req.query.search = req.query.q || req.query.search;
+  return exports.getAllProducts(req, res, next);
+};
+
+exports.getTrendingProducts = async (req, res, next) => {
+  try {
+    const range = String(req.query.range || '7d');
+    const days = range === '30d' ? 30 : 7;
+    const { page, limit, skip } = parsePagination(req.query, { page: 1, limit: 8 });
+    const cacheKey = `trending:${days}:${page}:${limit}`;
+    const cached = getTrendingCache(cacheKey);
+    if (cached) return res.status(200).json({ success: true, ...cached, cached: true });
+
+    const fromDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const pipeline = [
+      {
+        $match: {
+          createdAt: { $gte: fromDate },
+          eventType: { $in: ['VIEW', 'CLICK', 'ADD_TO_CART', 'PURCHASE'] }
+        }
+      },
+      {
+        $group: {
+          _id: '$productId',
+          views: { $sum: { $cond: [{ $eq: ['$eventType', 'VIEW'] }, 1, 0] } },
+          clicks: { $sum: { $cond: [{ $eq: ['$eventType', 'CLICK'] }, 1, 0] } },
+          addToCart: { $sum: { $cond: [{ $eq: ['$eventType', 'ADD_TO_CART'] }, 1, 0] } },
+          purchases: { $sum: { $cond: [{ $eq: ['$eventType', 'PURCHASE'] }, 1, 0] } }
+        }
+      },
+      {
+        $project: {
+          productId: '$_id',
+          views: 1,
+          clicks: 1,
+          addToCart: 1,
+          purchases: 1,
+          trendingScore: {
+            $add: [
+              '$views',
+              { $multiply: ['$clicks', 2] },
+              { $multiply: ['$addToCart', 3] },
+              { $multiply: ['$purchases', 8] }
+            ]
+          }
+        }
+      },
+      { $sort: { trendingScore: -1, purchases: -1, clicks: -1 } },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'productId',
+          foreignField: '_id',
+          as: 'product'
+        }
+      },
+      { $unwind: '$product' },
+      { $match: { 'product.status': PRODUCT_STATUS.PUBLISHED, 'product.isActive': true } },
+      {
+        $facet: {
+          total: [{ $count: 'value' }],
+          data: [
+            { $skip: skip },
+            { $limit: limit },
+            {
+              $project: {
+                trendingScore: 1,
+                views: 1,
+                clicks: 1,
+                addToCart: 1,
+                purchases: 1,
+                product: 1
+              }
+            }
+          ]
+        }
+      }
+    ];
+
+    const agg = await ProductAnalyticsEvent.aggregate(pipeline);
+    const total = agg[0]?.total?.[0]?.value || 0;
+    const rows = agg[0]?.data || [];
+
+    const productIds = rows.map((row) => row.product._id);
+    const products = await Product.find({ _id: { $in: productIds } })
+      .populate('vendor', 'storeName slug logo')
+      .populate('category', 'name slug')
+      .select('name title description shortDescription slug price images category vendor rating ratingAvg ratingCount totalSales createdAt featured status isActive');
+    const productMap = new Map(products.map((p) => [String(p._id), p]));
+    let orderedProducts = rows
+      .map((row) => {
+        const product = productMap.get(String(row.product._id));
+        if (!product) return null;
+        return {
+          ...product.toObject(),
+          trendingScore: row.trendingScore,
+          trendingMetrics: {
+            views: row.views,
+            clicks: row.clicks,
+            addToCart: row.addToCart,
+            purchases: row.purchases
+          }
+        };
+      })
+      .filter(Boolean);
+
+    if (orderedProducts.length === 0) {
+      const fallback = await Product.find(PUBLIC_PRODUCT_QUERY)
+        .select(PUBLIC_PRODUCT_EXCLUDE_FIELDS)
+        .populate('vendor', 'storeName slug logo rating')
+        .populate('category', 'name slug')
+        .sort({ totalSales: -1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit);
+      orderedProducts = fallback.map((product) => ({
+        ...product.toObject(),
+        trendingScore: product.totalSales || 0,
+        trendingMetrics: {
+          views: product.views || 0,
+          clicks: 0,
+          addToCart: 0,
+          purchases: product.totalSales || 0
+        }
+      }));
+    }
+
+    const payload = {
+      count: orderedProducts.length,
+      total,
+      pages: Math.ceil(total / limit),
+      currentPage: page,
+      data: orderedProducts
+    };
+    setTrendingCache(cacheKey, payload);
+    res.status(200).json({ success: true, ...payload });
   } catch (error) {
     next(error);
   }
