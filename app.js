@@ -79,6 +79,9 @@ const adminPlaybookRoutes = require('./routes/adminPlaybook');
 const trackingRoutes = require('./routes/tracking');
 const adminDashboardRoutes = require('./routes/adminDashboard');
 const vendorDashboardRoutes = require('./routes/vendorDashboard');
+const wishlistRoutes = require('./routes/wishlist');
+const cartRoutes = require('./routes/cart');
+const recentlyViewedRoutes = require('./routes/recentlyViewed');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -118,6 +121,9 @@ app.use('/api/emails', emailRoutes);
 app.use('/api/knowledge', knowledgeRoutes);
 app.use('/api/posts', postsRoutes);
 app.use('/api/track', trackingRoutes);
+app.use('/api/wishlist', wishlistRoutes);
+app.use('/api/cart', cartRoutes);
+app.use('/api/recently-viewed', recentlyViewedRoutes);
 app.use('/debug', debugRoutes);
 
 app.get('/api/health', (req, res) => {
