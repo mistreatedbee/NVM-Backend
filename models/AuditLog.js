@@ -27,12 +27,44 @@ const actionTypeEnum = [
   'REVIEW_DELETE',
   'DOC_APPROVE',
   'DOC_REJECT',
+  'CATEGORY_CREATE',
+  'CATEGORY_UPDATE',
+  'CATEGORY_FEATURE',
+  'CATEGORY_REORDER',
+  'CATEGORY_DEACTIVATE',
+  'CATEGORY_DELETE',
+  'PROHIBITED_RULE_CREATE',
+  'PROHIBITED_RULE_UPDATE',
+  'PROHIBITED_RULE_DELETE',
+  'ORDER_CANCEL',
+  'REFUND_APPROVE',
+  'REFUND_REJECT',
+  'REFUND_MARK_REFUNDED',
+  'DISPUTE_STATUS_UPDATE',
+  'DISPUTE_MESSAGE_ADD',
+  'FRAUD_FLAG_CREATE',
+  'FRAUD_FLAG_RESOLVE',
+  'REPORT_STATUS_UPDATE',
+  'CMS_PAGE_CREATE',
+  'CMS_PAGE_UPDATE',
+  'CMS_PAGE_DELETE',
+  'CMS_PAGE_PUBLISH',
+  'CMS_PAGE_UNPUBLISH',
+  'BANNER_CREATE',
+  'BANNER_UPDATE',
+  'BANNER_DELETE',
+  'HOMEPAGE_SECTION_CREATE',
+  'HOMEPAGE_SECTION_UPDATE',
+  'HOMEPAGE_SECTION_DELETE',
+  'HOMEPAGE_SECTION_REORDER',
+  'ORDER_CHARGEBACK_OPEN',
+  'ORDER_CHARGEBACK_RESOLVE',
   'NOTIFICATION_BROADCAST',
   'SYSTEM_ALERT_CREATED',
   'ADMIN_ALERT_CREATED'
 ];
 
-const targetTypeEnum = ['USER', 'VENDOR', 'PRODUCT', 'REVIEW', 'ORDER', 'DOCUMENT', 'SYSTEM'];
+const targetTypeEnum = ['USER', 'VENDOR', 'PRODUCT', 'REVIEW', 'ORDER', 'DOCUMENT', 'SYSTEM', 'CATEGORY', 'CMS_PAGE', 'BANNER', 'HOMEPAGE_SECTION', 'REPORT', 'DISPUTE', 'REFUND', 'FRAUD_FLAG', 'PROHIBITED_RULE'];
 
 const auditLogSchema = new mongoose.Schema({
   actorId: {
@@ -51,7 +83,7 @@ const auditLogSchema = new mongoose.Schema({
   },
   entityType: {
     type: String,
-    enum: ['Conversation', 'Message', 'SupportTicket', 'Notification', 'Vendor', 'User', 'Order', 'System', 'Document', 'Product', 'Invoice', 'VendorTransaction', 'Review'],
+    enum: ['Conversation', 'Message', 'SupportTicket', 'Notification', 'Vendor', 'User', 'Order', 'System', 'Document', 'Product', 'Invoice', 'VendorTransaction', 'Review', 'Category', 'Cms_page', 'Banner', 'Homepage_section', 'Report', 'Dispute', 'Refund', 'Fraud_flag', 'Prohibited_rule'],
     default: 'System'
   },
   entityId: {

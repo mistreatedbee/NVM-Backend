@@ -293,6 +293,15 @@ const orderSchema = new mongoose.Schema({
   cancellationReason: String,
   refundAmount: Number,
   refundedAt: Date,
+  chargebackStatus: {
+    type: String,
+    enum: ['NONE', 'CHARGEBACK_OPEN', 'CHARGEBACK_RESOLVED'],
+    default: 'NONE'
+  },
+  chargebackNotes: {
+    type: String,
+    default: ''
+  },
   invoiceIds: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Invoice'

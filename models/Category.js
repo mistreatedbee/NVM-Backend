@@ -17,6 +17,10 @@ const categorySchema = new mongoose.Schema({
     type: String,
     maxlength: [500, 'Description cannot be more than 500 characters']
   },
+  imageUrl: {
+    type: String,
+    default: ''
+  },
   parent: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Category',
@@ -31,6 +35,10 @@ const categorySchema = new mongoose.Schema({
     url: String
   },
   order: {
+    type: Number,
+    default: 0
+  },
+  sortOrder: {
     type: Number,
     default: 0
   },
@@ -54,6 +62,8 @@ const categorySchema = new mongoose.Schema({
 categorySchema.index({ parent: 1 });
 categorySchema.index({ isActive: 1 });
 categorySchema.index({ order: 1 });
+categorySchema.index({ isActive: 1, sortOrder: 1 });
+categorySchema.index({ isFeatured: 1, sortOrder: 1 });
 
 // Generate slug before saving
 categorySchema.pre('save', function(next) {
@@ -62,6 +72,15 @@ categorySchema.pre('save', function(next) {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '');
+  }
+  if (this.sortOrder === undefined || this.sortOrder === null) {
+    this.sortOrder = this.order || 0;
+  }
+  if (this.order === undefined || this.order === null) {
+    this.order = this.sortOrder || 0;
+  }
+  if (!this.imageUrl && this.image?.url) {
+    this.imageUrl = this.image.url;
   }
   next();
 });

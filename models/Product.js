@@ -270,6 +270,19 @@ const productSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  flagged: {
+    type: Boolean,
+    default: false
+  },
+  flagReason: {
+    type: String,
+    default: ''
+  },
+  flagSeverity: {
+    type: String,
+    enum: ['LOW', 'MEDIUM', 'HIGH', ''],
+    default: ''
+  },
   activityLogs: [{
     action: {
       type: String,
@@ -312,6 +325,7 @@ productSchema.index({ totalSales: -1 });
 productSchema.index({ createdAt: -1 });
 productSchema.index({ publishedAt: -1 });
 productSchema.index({ reportCount: -1 });
+productSchema.index({ flagged: 1, flagSeverity: 1, createdAt: -1 });
 productSchema.index({ status: 1, isActive: 1, category: 1, price: 1 });
 productSchema.index({ featured: 1, status: 1, isActive: 1 });
 productSchema.index({ 'reports.status': 1 });

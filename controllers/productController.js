@@ -59,6 +59,18 @@ async function resolveCategoryFilter(categoryParam) {
   return byName?._id || null;
 }
 
+async function getPublicVisibilityFilters() {
+  const [categories, vendors] = await Promise.all([
+    Category.find({ isActive: true }).select('_id'),
+    Vendor.find({ vendorStatus: 'ACTIVE', isActive: true }).select('_id')
+  ]);
+
+  return {
+    category: { $in: categories.map((item) => item._id) },
+    vendor: { $in: vendors.map((item) => item._id) }
+  };
+}
+
 function getTrendingCache(key) {
   const entry = trendingCache.get(key);
   if (!entry) return null;
@@ -343,7 +355,7 @@ function buildPublicSort(sort, hasTextQuery) {
 exports.getAllProducts = async (req, res, next) => {
   try {
     const { page, limit, skip } = parsePagination(req.query, { page: 1, limit: 12 });
-    const query = { ...PUBLIC_PRODUCT_QUERY };
+    const query = { ...PUBLIC_PRODUCT_QUERY, ...(await getPublicVisibilityFilters()) };
     const q = String(req.query.search || '').trim();
 
     if (req.query.category) {
@@ -392,8 +404,10 @@ exports.getAllProducts = async (req, res, next) => {
 
 exports.getProduct = async (req, res, next) => {
   try {
-    const product = await Product.findById(req.params.id).populate('vendor', 'storeName slug logo rating totalReviews').populate('category', 'name slug');
-    if (!product || product.status !== PRODUCT_STATUS.PUBLISHED || !product.isActive) {
+    const product = await Product.findById(req.params.id).populate('vendor', 'storeName slug logo rating totalReviews vendorStatus isActive').populate('category', 'name slug isActive');
+    const vendorBlocked = !product?.vendor || product.vendor.vendorStatus !== 'ACTIVE' || product.vendor.isActive === false;
+    const categoryBlocked = !product?.category || product.category.isActive === false;
+    if (!product || product.status !== PRODUCT_STATUS.PUBLISHED || !product.isActive || vendorBlocked || categoryBlocked) {
       return res.status(404).json({ success: false, message: 'Product not found' });
     }
 
@@ -401,8 +415,8 @@ exports.getProduct = async (req, res, next) => {
     await product.save({ validateBeforeSave: false });
     const sanitized = await Product.findById(product._id)
       .select(PUBLIC_PRODUCT_EXCLUDE_FIELDS)
-      .populate('vendor', 'storeName slug logo rating totalReviews')
-      .populate('category', 'name slug');
+      .populate('vendor', 'storeName slug logo rating totalReviews vendorStatus isActive')
+      .populate('category', 'name slug isActive');
     res.status(200).json({ success: true, data: sanitized });
   } catch (error) {
     next(error);
@@ -411,8 +425,10 @@ exports.getProduct = async (req, res, next) => {
 
 exports.getProductBySlug = async (req, res, next) => {
   try {
-    const product = await Product.findOne({ slug: req.params.slug }).populate('vendor', 'storeName slug logo rating totalReviews').populate('category', 'name slug');
-    if (!product || product.status !== PRODUCT_STATUS.PUBLISHED || !product.isActive) {
+    const product = await Product.findOne({ slug: req.params.slug }).populate('vendor', 'storeName slug logo rating totalReviews vendorStatus isActive').populate('category', 'name slug isActive');
+    const vendorBlocked = !product?.vendor || product.vendor.vendorStatus !== 'ACTIVE' || product.vendor.isActive === false;
+    const categoryBlocked = !product?.category || product.category.isActive === false;
+    if (!product || product.status !== PRODUCT_STATUS.PUBLISHED || !product.isActive || vendorBlocked || categoryBlocked) {
       return res.status(404).json({ success: false, message: 'Product not found' });
     }
 
@@ -420,8 +436,8 @@ exports.getProductBySlug = async (req, res, next) => {
     await product.save({ validateBeforeSave: false });
     const sanitized = await Product.findById(product._id)
       .select(PUBLIC_PRODUCT_EXCLUDE_FIELDS)
-      .populate('vendor', 'storeName slug logo rating totalReviews')
-      .populate('category', 'name slug');
+      .populate('vendor', 'storeName slug logo rating totalReviews vendorStatus isActive')
+      .populate('category', 'name slug isActive');
     res.status(200).json({ success: true, data: sanitized });
   } catch (error) {
     next(error);
@@ -989,7 +1005,7 @@ exports.getVendorProducts = async (req, res, next) => {
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 12;
     const skip = (page - 1) * limit;
-    const query = { vendor: req.params.vendorId, ...PUBLIC_PRODUCT_QUERY };
+    const query = { vendor: req.params.vendorId, ...(await getPublicVisibilityFilters()), ...PUBLIC_PRODUCT_QUERY };
 
     const [products, total] = await Promise.all([
       Product.find(query).select(PUBLIC_PRODUCT_EXCLUDE_FIELDS).populate('category', 'name slug').sort('-createdAt').skip(skip).limit(limit),
@@ -1005,26 +1021,27 @@ exports.getVendorProducts = async (req, res, next) => {
 exports.getFeaturedProducts = async (req, res, next) => {
   try {
     const { page, limit, skip } = parsePagination(req.query, { page: 1, limit: 8 });
+    const visibility = await getPublicVisibilityFilters();
     let [products, total] = await Promise.all([
-      Product.find({ featured: true, ...PUBLIC_PRODUCT_QUERY })
+      Product.find({ featured: true, ...PUBLIC_PRODUCT_QUERY, ...visibility })
         .select(PUBLIC_PRODUCT_EXCLUDE_FIELDS)
         .populate('vendor', 'storeName slug logo')
         .populate('category', 'name slug')
         .sort({ ratingAvg: -1, totalSales: -1, createdAt: -1 })
         .skip(skip)
         .limit(limit),
-      Product.countDocuments({ featured: true, ...PUBLIC_PRODUCT_QUERY })
+      Product.countDocuments({ featured: true, ...PUBLIC_PRODUCT_QUERY, ...visibility })
     ]);
 
     if (products.length === 0 && page === 1) {
       [products, total] = await Promise.all([
-        Product.find(PUBLIC_PRODUCT_QUERY)
+        Product.find({ ...PUBLIC_PRODUCT_QUERY, ...visibility })
           .select(PUBLIC_PRODUCT_EXCLUDE_FIELDS)
           .populate('vendor', 'storeName slug logo')
           .populate('category', 'name slug')
           .sort({ ratingAvg: -1, totalSales: -1, createdAt: -1 })
           .limit(limit),
-        Product.countDocuments(PUBLIC_PRODUCT_QUERY)
+        Product.countDocuments({ ...PUBLIC_PRODUCT_QUERY, ...visibility })
       ]);
     }
 
