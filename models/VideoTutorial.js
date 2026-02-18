@@ -62,7 +62,6 @@ const videoTutorialSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-videoTutorialSchema.index({ slug: 1 }, { unique: true });
 videoTutorialSchema.index({ status: 1, category: 1 });
 videoTutorialSchema.index({ title: 'text', description: 'text' });
 
