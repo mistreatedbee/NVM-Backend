@@ -6,6 +6,11 @@ function normalizeRole(role) {
   return String(role || '').toUpperCase();
 }
 
+function hasRole(user, ...roles) {
+  const current = normalizeRole(user?.role);
+  return roles.map(normalizeRole).includes(current);
+}
+
 async function authenticate(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
@@ -96,11 +101,11 @@ async function requireVendorActive(req, res, next) {
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
 
-    if (String(req.user.role) === 'admin') {
+    if (hasRole(req.user, 'admin')) {
       return next();
     }
 
-    if (String(req.user.role) !== 'vendor') {
+    if (!hasRole(req.user, 'vendor')) {
       return res.status(403).json({ success: false, message: 'Vendor privileges required' });
     }
 
@@ -139,7 +144,7 @@ function requireOwner(paramName = 'id', field = '_id') {
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
 
-    if (String(req.user.role) === 'admin') return next();
+    if (hasRole(req.user, 'admin')) return next();
 
     const expected = String(req.params[paramName] || '');
     const actual = String(req.user[field] || req.user._id || '');
@@ -153,7 +158,7 @@ function requireOwner(paramName = 'id', field = '_id') {
 }
 
 function isAdmin(req, res, next) {
-  if (req.user && req.user.role === 'admin') {
+  if (hasRole(req.user, 'admin')) {
     next();
   } else {
     res.status(403).json({
@@ -164,7 +169,7 @@ function isAdmin(req, res, next) {
 }
 
 function isVendor(req, res, next) {
-  if (req.user && (req.user.role === 'vendor' || req.user.role === 'admin')) {
+  if (hasRole(req.user, 'vendor', 'admin')) {
     next();
   } else {
     res.status(403).json({
