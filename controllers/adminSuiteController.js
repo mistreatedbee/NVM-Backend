@@ -10,13 +10,17 @@ const VendorDocument = require('../models/VendorDocument');
 const User = require('../models/User');
 const RefundRequest = require('../models/RefundRequest');
 const FraudFlag = require('../models/FraudFlag');
+const FraudRule = require('../models/FraudRule');
 const Report = require('../models/Report');
+const Review = require('../models/Review');
 const Order = require('../models/Order');
 const Dispute = require('../models/Dispute');
 const ActivityLog = require('../models/ActivityLog');
 const AuditLog = require('../models/AuditLog');
 const ProductHistory = require('../models/ProductHistory');
 const { logAudit, resolveIp } = require('../services/loggingService');
+const { validateVendorCanBeVerified, computeVendorKycStatus, evaluateFraudRules } = require('../services/trustSafetyService');
+const { notifyUser } = require('../services/notificationService');
 
 function parsePagination(query, defaultLimit = 20) {
   const page = Math.max(1, parseInt(query.page, 10) || 1);
@@ -310,10 +314,19 @@ exports.approveAdminVendor = async (req, res, next) => {
     const old = { vendorStatus: vendor.vendorStatus, verificationStatus: vendor.verificationStatus };
     await setVendorAndUserState(vendor, user, 'ACTIVE', '', req.user.id);
     vendor.verificationStatus = 'VERIFIED';
+    vendor.verifiedAt = new Date();
+    vendor.verifiedBy = req.user.id;
+    vendor.verificationNote = String(req.body?.note || '').trim();
     vendor.approvedBy = req.user.id;
     vendor.approvedAt = new Date();
 
     await Promise.all([vendor.save(), user ? user.save() : Promise.resolve()]);
+    await evaluateFraudRules({
+      entityType: 'VENDOR',
+      entityId: vendor._id,
+      createdBy: req.user.id,
+      vendor
+    });
     await audit(req, 'VENDOR_APPROVE', 'VENDOR', vendor._id, '', { old, new: { vendorStatus: vendor.vendorStatus, verificationStatus: vendor.verificationStatus } });
     return res.status(200).json({ success: true, data: vendor });
   } catch (error) { return next(error); }
@@ -330,6 +343,9 @@ exports.rejectAdminVendor = async (req, res, next) => {
 
     await setVendorAndUserState(vendor, user, 'REJECTED', reason, req.user.id);
     vendor.verificationStatus = 'UNVERIFIED';
+    vendor.verifiedAt = null;
+    vendor.verifiedBy = null;
+    vendor.verificationNote = reason;
 
     await Promise.all([vendor.save(), user ? user.save() : Promise.resolve()]);
     await audit(req, 'VENDOR_REJECT', 'VENDOR', vendor._id, reason, { vendorStatus: vendor.vendorStatus });
@@ -368,24 +384,66 @@ exports.unsuspendAdminVendor = async (req, res, next) => {
 
 exports.verifyAdminVendor = async (req, res, next) => {
   try {
-    const vendor = await Vendor.findById(req.params.vendorId);
-    if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
-    const old = vendor.verificationStatus;
+    const note = String(req.body?.note || '').trim();
+    const verification = await validateVendorCanBeVerified(req.params.vendorId);
+    if (!verification.ok) {
+      return res.status(400).json({
+        success: false,
+        message: verification.message,
+        data: verification.kyc || null
+      });
+    }
+    const vendor = verification.vendor;
+    const old = {
+      verificationStatus: vendor.verificationStatus,
+      verifiedAt: vendor.verifiedAt || null,
+      verifiedBy: vendor.verifiedBy || null
+    };
     vendor.verificationStatus = 'VERIFIED';
+    vendor.verifiedAt = new Date();
+    vendor.verifiedBy = req.user.id;
+    vendor.verificationNote = note;
+    vendor.kycDocsComplete = true;
     await vendor.save();
-    await audit(req, 'VENDOR_VERIFY', 'VENDOR', vendor._id, '', { old, new: vendor.verificationStatus });
+    await audit(req, 'VENDOR_VERIFY', 'VENDOR', vendor._id, note, {
+      old,
+      new: {
+        verificationStatus: vendor.verificationStatus,
+        verifiedAt: vendor.verifiedAt,
+        verifiedBy: vendor.verifiedBy
+      },
+      kyc: verification.kyc
+    });
     return res.status(200).json({ success: true, data: vendor });
   } catch (error) { return next(error); }
 };
 
 exports.unverifyAdminVendor = async (req, res, next) => {
   try {
+    const note = String(req.body?.note || '').trim();
     const vendor = await Vendor.findById(req.params.vendorId);
     if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
-    const old = vendor.verificationStatus;
+    const old = {
+      verificationStatus: vendor.verificationStatus,
+      verifiedAt: vendor.verifiedAt || null,
+      verifiedBy: vendor.verifiedBy || null
+    };
     vendor.verificationStatus = 'UNVERIFIED';
+    vendor.verifiedAt = null;
+    vendor.verifiedBy = null;
+    vendor.verificationNote = note;
+    const kyc = await computeVendorKycStatus(vendor._id);
+    vendor.kycDocsComplete = Boolean(kyc.complete);
     await vendor.save();
-    await audit(req, 'VENDOR_UNVERIFY', 'VENDOR', vendor._id, '', { old, new: vendor.verificationStatus });
+    await audit(req, 'VENDOR_UNVERIFY', 'VENDOR', vendor._id, note, {
+      old,
+      new: {
+        verificationStatus: vendor.verificationStatus,
+        verifiedAt: vendor.verifiedAt,
+        verifiedBy: vendor.verifiedBy
+      },
+      kyc
+    });
     return res.status(200).json({ success: true, data: vendor });
   } catch (error) { return next(error); }
 };
@@ -414,6 +472,8 @@ exports.approveAdminVendorDocument = async (req, res, next) => {
     document.reviewedAt = new Date();
     document.reviewNote = '';
     await document.save();
+    const kyc = await computeVendorKycStatus(document.vendorId);
+    await Vendor.findByIdAndUpdate(document.vendorId, { $set: { kycDocsComplete: kyc.complete } });
     await audit(req, 'DOC_APPROVE', 'DOCUMENT', document._id, '', { vendorId: document.vendorId, status: document.status });
     return res.status(200).json({ success: true, data: document });
   } catch (error) { return next(error); }
@@ -432,6 +492,8 @@ exports.rejectAdminVendorDocument = async (req, res, next) => {
     document.reviewedAt = new Date();
     document.reviewNote = note;
     await document.save();
+    const kyc = await computeVendorKycStatus(document.vendorId);
+    await Vendor.findByIdAndUpdate(document.vendorId, { $set: { kycDocsComplete: kyc.complete } });
     await audit(req, 'DOC_REJECT', 'DOCUMENT', document._id, note, { vendorId: document.vendorId, status: document.status });
     return res.status(200).json({ success: true, data: document });
   } catch (error) { return next(error); }
@@ -789,7 +851,7 @@ exports.markAdminRefunded = async (req, res, next) => {
 };
 function normalizeDisputeStatus(status) {
   const value = String(status || '').toUpperCase();
-  return ['OPEN', 'IN_REVIEW', 'RESOLVED', 'CLOSED'].includes(value) ? value : null;
+  return ['OPEN', 'IN_REVIEW', 'NEED_MORE_INFO', 'RESOLVED', 'CLOSED'].includes(value) ? value : null;
 }
 
 exports.getAdminDisputes = async (req, res, next) => {
@@ -852,10 +914,42 @@ exports.updateAdminDisputeStatus = async (req, res, next) => {
       dispute.resolvedBy = req.user.id;
       dispute.resolvedAt = new Date();
       dispute.resolution = String(req.body?.resolution || dispute.resolution || '');
+      dispute.resolutionNote = dispute.resolution;
+      if (req.body?.outcome) dispute.outcome = String(req.body.outcome).toUpperCase();
     }
     await dispute.save();
 
     await audit(req, 'DISPUTE_STATUS_UPDATE', 'DISPUTE', dispute._id, String(req.body?.resolution || ''), { status: dispute.status });
+    return res.status(200).json({ success: true, data: dispute });
+  } catch (error) { return next(error); }
+};
+
+exports.resolveAdminDispute = async (req, res, next) => {
+  try {
+    const outcome = String(req.body?.outcome || '').toUpperCase();
+    const resolutionNote = String(req.body?.resolutionNote || '').trim();
+    if (!resolutionNote) return res.status(400).json({ success: false, message: 'resolutionNote is required' });
+
+    const allowedOutcomes = ['REFUND_APPROVED', 'REFUND_DENIED', 'REPLACEMENT', 'PARTIAL_REFUND', 'OTHER'];
+    if (outcome && !allowedOutcomes.includes(outcome)) {
+      return res.status(400).json({ success: false, message: 'Invalid outcome' });
+    }
+
+    const dispute = await Dispute.findById(req.params.id);
+    if (!dispute) return res.status(404).json({ success: false, message: 'Dispute not found' });
+
+    dispute.status = 'RESOLVED';
+    dispute.resolution = resolutionNote;
+    dispute.resolutionNote = resolutionNote;
+    dispute.outcome = outcome || 'OTHER';
+    dispute.resolvedBy = req.user.id;
+    dispute.resolvedAt = new Date();
+    await dispute.save();
+
+    await audit(req, 'DISPUTE_RESOLVE', 'DISPUTE', dispute._id, resolutionNote, {
+      status: dispute.status,
+      outcome: dispute.outcome
+    });
     return res.status(200).json({ success: true, data: dispute });
   } catch (error) { return next(error); }
 };
@@ -869,9 +963,46 @@ exports.createAdminFraudFlag = async (req, res, next) => {
     const order = await Order.findById(req.params.orderId);
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
 
-    const flag = await FraudFlag.create({ orderId: order._id, level, reason, status: 'OPEN', createdBy: req.user.id });
+    const flag = await FraudFlag.create({
+      entityType: 'ORDER',
+      entityId: order._id,
+      orderId: order._id,
+      level,
+      severity: level,
+      reason,
+      status: 'OPEN',
+      createdBy: req.user.id
+    });
     await audit(req, 'FRAUD_FLAG_CREATE', 'FRAUD_FLAG', flag._id, reason, { orderId: order._id, level });
     return res.status(201).json({ success: true, data: flag });
+  } catch (error) { return next(error); }
+};
+
+exports.getAdminFraudFlags = async (req, res, next) => {
+  try {
+    const { page, limit, skip } = parsePagination(req.query);
+    const query = { ...parseDateRange(req.query) };
+    if (req.query.status) query.status = String(req.query.status).toUpperCase();
+    if (req.query.severity) query.severity = String(req.query.severity).toUpperCase();
+    if (req.query.entityType) query.entityType = String(req.query.entityType).toUpperCase();
+    if (req.query.q) {
+      query.$or = [
+        { reason: rx(req.query.q) },
+        ...(isObjectId(req.query.q) ? [{ _id: req.query.q }, { entityId: req.query.q }, { orderId: req.query.q }] : [])
+      ];
+    }
+
+    const [data, total] = await Promise.all([
+      FraudFlag.find(query)
+        .populate('ruleId', 'name action severity')
+        .populate('createdBy', 'name email')
+        .populate('resolvedBy', 'name email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      FraudFlag.countDocuments(query)
+    ]);
+    return paged(res, data, total, page, limit);
   } catch (error) { return next(error); }
 };
 
@@ -885,10 +1016,74 @@ exports.resolveAdminFraudFlag = async (req, res, next) => {
     flag.resolvedBy = req.user.id;
     flag.resolvedAt = new Date();
     flag.note = note;
+    flag.resolutionNote = note;
     await flag.save();
 
     await audit(req, 'FRAUD_FLAG_RESOLVE', 'FRAUD_FLAG', flag._id, note, { status: flag.status });
     return res.status(200).json({ success: true, data: flag });
+  } catch (error) { return next(error); }
+};
+
+exports.dismissAdminFraudFlag = async (req, res, next) => {
+  try {
+    const note = String(req.body?.note || '').trim();
+    if (!note) return res.status(400).json({ success: false, message: 'note is required' });
+
+    const flag = await FraudFlag.findById(req.params.id);
+    if (!flag) return res.status(404).json({ success: false, message: 'Fraud flag not found' });
+
+    flag.status = 'DISMISSED';
+    flag.resolvedBy = req.user.id;
+    flag.resolvedAt = new Date();
+    flag.note = note;
+    flag.resolutionNote = note;
+    await flag.save();
+
+    await audit(req, 'FRAUD_FLAG_DISMISS', 'FRAUD_FLAG', flag._id, note, { status: flag.status });
+    return res.status(200).json({ success: true, data: flag });
+  } catch (error) { return next(error); }
+};
+
+exports.getAdminFraudRules = async (req, res, next) => {
+  try {
+    const { page, limit, skip } = parsePagination(req.query);
+    const query = {};
+    if (req.query.active === 'true' || req.query.active === 'false') query.isActive = req.query.active === 'true';
+    if (req.query.q) query.$or = [{ name: rx(req.query.q) }, { description: rx(req.query.q) }];
+
+    const [data, total] = await Promise.all([
+      FraudRule.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit),
+      FraudRule.countDocuments(query)
+    ]);
+    return paged(res, data, total, page, limit);
+  } catch (error) { return next(error); }
+};
+
+exports.createAdminFraudRule = async (req, res, next) => {
+  try {
+    const rule = await FraudRule.create(req.body || {});
+    await audit(req, 'FRAUD_RULE_CREATE', 'FRAUD_RULE', rule._id, '', { new: rule.toObject() });
+    return res.status(201).json({ success: true, data: rule });
+  } catch (error) { return next(error); }
+};
+
+exports.updateAdminFraudRule = async (req, res, next) => {
+  try {
+    const oldRule = await FraudRule.findById(req.params.id);
+    if (!oldRule) return res.status(404).json({ success: false, message: 'Fraud rule not found' });
+    const rule = await FraudRule.findByIdAndUpdate(req.params.id, req.body || {}, { new: true, runValidators: true });
+    await audit(req, 'FRAUD_RULE_UPDATE', 'FRAUD_RULE', rule._id, '', { old: oldRule.toObject(), new: rule.toObject() });
+    return res.status(200).json({ success: true, data: rule });
+  } catch (error) { return next(error); }
+};
+
+exports.deleteAdminFraudRule = async (req, res, next) => {
+  try {
+    const rule = await FraudRule.findById(req.params.id);
+    if (!rule) return res.status(404).json({ success: false, message: 'Fraud rule not found' });
+    await FraudRule.deleteOne({ _id: rule._id });
+    await audit(req, 'FRAUD_RULE_DELETE', 'FRAUD_RULE', rule._id, String(req.body?.reason || ''), { deleted: rule.toObject() });
+    return res.status(200).json({ success: true, message: 'Deleted' });
   } catch (error) { return next(error); }
 };
 
@@ -898,13 +1093,21 @@ exports.getAdminReports = async (req, res, next) => {
     const query = { ...parseDateRange(req.query) };
     if (req.query.status) query.status = req.query.status;
     if (req.query.targetType) query.targetType = req.query.targetType;
-    if (req.query.q) query.$or = [{ reason: rx(req.query.q) }, ...(isObjectId(req.query.q) ? [{ _id: req.query.q }, { targetId: req.query.q }, { reporterId: req.query.q }] : [])];
+    if (req.query.q) query.$or = [{ reason: rx(req.query.q) }, { description: rx(req.query.q) }, ...(isObjectId(req.query.q) ? [{ _id: req.query.q }, { targetId: req.query.q }, { reporterId: req.query.q }] : [])];
 
     const [data, total] = await Promise.all([
       Report.find(query).populate('reporterId', 'name email').sort({ createdAt: -1 }).skip(skip).limit(limit),
       Report.countDocuments(query)
     ]);
     return paged(res, data, total, page, limit);
+  } catch (error) { return next(error); }
+};
+
+exports.getAdminReportById = async (req, res, next) => {
+  try {
+    const report = await Report.findById(req.params.reportId).populate('reporterId', 'name email role').populate('resolvedBy', 'name email role');
+    if (!report) return res.status(404).json({ success: false, message: 'Report not found' });
+    return res.status(200).json({ success: true, data: report });
   } catch (error) { return next(error); }
 };
 
@@ -916,9 +1119,55 @@ exports.updateAdminReportStatus = async (req, res, next) => {
     const report = await Report.findById(req.params.reportId);
     if (!report) return res.status(404).json({ success: false, message: 'Report not found' });
 
+    const resolutionNote = String(req.body?.resolutionNote || req.body?.reason || '').trim();
     report.status = status;
+    if (status === 'RESOLVED' || status === 'DISMISSED') {
+      report.resolvedBy = req.user.id;
+      report.resolutionNote = resolutionNote;
+    }
+
+    const quickAction = String(req.body?.quickAction || '').toUpperCase();
+    if (quickAction) {
+      if (quickAction === 'SUSPEND_VENDOR' && report.targetType === 'VENDOR') {
+        await Vendor.findByIdAndUpdate(report.targetId, {
+          $set: { vendorStatus: 'SUSPENDED', status: 'suspended', accountStatus: 'suspended', isActive: false, suspensionReason: resolutionNote || 'Suspended from report action' }
+        });
+      } else if (quickAction === 'UNPUBLISH_PRODUCT' && report.targetType === 'PRODUCT') {
+        await Product.findByIdAndUpdate(report.targetId, {
+          $set: { isActive: false, flagged: true, flagReason: resolutionNote || 'Unpublished from report action', flagSeverity: 'HIGH' }
+        });
+      } else if (quickAction === 'BAN_USER' && (report.targetType === 'USER' || report.targetType === 'VENDOR')) {
+        const userId = report.targetType === 'USER'
+          ? report.targetId
+          : (await Vendor.findById(report.targetId).select('user'))?.user;
+        if (userId) {
+          await User.findByIdAndUpdate(userId, {
+            $set: { accountStatus: 'BANNED', isBanned: true, isActive: false, banReason: resolutionNote || 'Banned from report action' }
+          });
+        }
+      } else if (quickAction === 'HIDE_REVIEW' && report.targetType === 'REVIEW') {
+        await Review.findByIdAndUpdate(report.targetId, {
+          $set: {
+            status: 'HIDDEN',
+            moderation: { reason: resolutionNote || 'Hidden from report action', moderatedBy: req.user.id, moderatedAt: new Date() }
+          }
+        });
+      } else {
+        return res.status(400).json({ success: false, message: 'Invalid quickAction for targetType' });
+      }
+
+      await audit(req, 'REPORT_QUICK_ACTION', 'REPORT', report._id, resolutionNote, {
+        quickAction,
+        targetType: report.targetType,
+        targetId: report.targetId
+      });
+    }
+
     await report.save();
-    await audit(req, 'REPORT_STATUS_UPDATE', 'REPORT', report._id, String(req.body?.reason || ''), { status: report.status });
+    await audit(req, 'REPORT_STATUS_UPDATE', 'REPORT', report._id, resolutionNote, {
+      status: report.status,
+      quickAction: quickAction || null
+    });
     return res.status(200).json({ success: true, data: report });
   } catch (error) { return next(error); }
 };

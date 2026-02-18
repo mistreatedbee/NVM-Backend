@@ -55,9 +55,17 @@ router.get('/disputes', controller.getAdminDisputes);
 router.get('/disputes/:id', controller.getAdminDisputeById);
 router.post('/disputes/:id/message', controller.addAdminDisputeMessage);
 router.patch('/disputes/:id/status', controller.updateAdminDisputeStatus);
+router.patch('/disputes/:id/resolve', controller.resolveAdminDispute);
 
 router.post('/orders/:orderId/fraud-flag', controller.createAdminFraudFlag);
+router.get('/fraud-flags', controller.getAdminFraudFlags);
 router.patch('/fraud/:id/resolve', controller.resolveAdminFraudFlag);
+router.patch('/fraud-flags/:id/dismiss', controller.dismissAdminFraudFlag);
+router.get('/fraud-rules', controller.getAdminFraudRules);
+router.post('/fraud-rules', controller.createAdminFraudRule);
+router.put('/fraud-rules/:id', controller.updateAdminFraudRule);
+router.patch('/fraud-rules/:id', controller.updateAdminFraudRule);
+router.delete('/fraud-rules/:id', controller.deleteAdminFraudRule);
 
 router.get('/users', controller.getAdminUsers);
 router.get('/users/:userId', controller.getAdminUserById);
@@ -69,6 +77,7 @@ router.patch('/users/:userId/unban', controller.unbanAdminUser);
 router.patch('/users/:userId/edit', controller.editAdminUser);
 
 router.get('/reports', controller.getAdminReports);
+router.get('/reports/:reportId', controller.getAdminReportById);
 router.patch('/reports/:reportId/status', controller.updateAdminReportStatus);
 
 router.get('/activity', controller.getAdminActivity);

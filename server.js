@@ -6,6 +6,8 @@ const app = require('./app');
 const { ensureDefaultCategories } = require('./utils/seedDefaultCategories');
 const { initSocket } = require('./socket');
 const registerChatHandler = require('./socket/chatHandler');
+const { startVendorFeatureJobs } = require('./controllers/vendorFeatureController');
+const { startTrustSafetyJobs } = require('./services/trustSafetyService');
 
 dotenv.config();
 
@@ -27,6 +29,8 @@ mongoose.connect(process.env.MONGO_URI)
 
     initSocket(io);
     registerChatHandler(io);
+    startVendorFeatureJobs();
+    startTrustSafetyJobs();
 
     httpServer.listen(PORT, () => {
       console.log(`VM Marketplace Server running on port ${PORT}`);

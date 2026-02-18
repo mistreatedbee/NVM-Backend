@@ -13,6 +13,13 @@ const vendorSchema = new mongoose.Schema({
     trim: true,
     maxlength: [100, 'Store name cannot be more than 100 characters']
   },
+  storeSlug: {
+    type: String,
+    unique: true,
+    sparse: true,
+    lowercase: true,
+    trim: true
+  },
   slug: {
     type: String,
     unique: true,
@@ -36,6 +43,11 @@ const vendorSchema = new mongoose.Schema({
   bio: {
     type: String,
     maxlength: [1000, 'Bio cannot be more than 1000 characters']
+  },
+  contact: {
+    phone: String,
+    email: String,
+    whatsapp: String
   },
   logo: {
     public_id: String,
@@ -98,18 +110,52 @@ const vendorSchema = new mongoose.Schema({
     facebook: String,
     instagram: String,
     tiktok: String,
-    website: String
+    website: String,
+    youtube: String
   },
   location: {
     country: String,
     state: String,
     city: String,
     suburb: String,
-    addressLine: String
+    addressLine: String,
+    province: String,
+    address: String,
+    lat: Number,
+    lng: Number
+  },
+  storePolicies: {
+    shippingPolicy: String,
+    returnsPolicy: String,
+    refundPolicy: String,
+    terms: String
   },
   
   // Banking Information (for EFT payments) - Optional but recommended
   bankDetails: {
+    bankName: {
+      type: String
+    },
+    accountHolder: {
+      type: String
+    },
+    accountNumber: {
+      type: String
+    },
+    branchCode: {
+      type: String
+    },
+    accountType: {
+      type: String,
+      enum: ['savings', 'current', 'business'],
+      default: 'current'
+    },
+    payoutEmail: {
+      type: String
+    },
+    payoutReference: {
+      type: String
+    },
     accountHolderName: {
       type: String
       // Made optional - vendors can add this later
@@ -126,15 +172,16 @@ const vendorSchema = new mongoose.Schema({
       type: String
       // Made optional - vendors can add this later
     },
-    accountType: {
-      type: String,
-      enum: ['savings', 'current', 'business'],
-      default: 'current'
-    },
     swiftCode: String // For international payments
   },
   
   // Status and Approval
+  vendorStatus: {
+    type: String,
+    enum: ['PENDING', 'ACTIVE', 'SUSPENDED', 'REJECTED'],
+    default: 'PENDING',
+    index: true
+  },
   status: {
     type: String,
     enum: ['pending', 'approved', 'rejected', 'suspended'],
@@ -150,12 +197,35 @@ const vendorSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
+  approval: {
+    approvedAt: Date,
+    approvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }
+  },
   rejectionReason: String,
+  rejection: {
+    rejectedAt: Date,
+    rejectedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    rejectionReason: String
+  },
   suspensionReason: String,
   suspendedAt: Date,
   suspendedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
+  },
+  suspension: {
+    suspendedAt: Date,
+    suspendedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    suspensionReason: String
   },
   bannedAt: Date,
   bannedBy: {
@@ -249,7 +319,17 @@ const vendorSchema = new mongoose.Schema({
     min: 0,
     max: 5
   },
+  vendorRatingAvg: {
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 5
+  },
   totalReviews: {
+    type: Number,
+    default: 0
+  },
+  vendorRatingCount: {
     type: Number,
     default: 0
   },
@@ -285,16 +365,40 @@ const vendorSchema = new mongoose.Schema({
     shippingPolicy: String,
     termsAndConditions: String
   },
-  businessHours: String,
+  businessHours: {
+    type: mongoose.Schema.Types.Mixed,
+    default: []
+  },
   policies: {
     returns: String,
     shipping: String
   },
   verificationStatus: {
     type: String,
-    enum: ['pending', 'verified'],
-    default: 'pending'
+    enum: ['UNVERIFIED', 'PENDING', 'VERIFIED', 'REJECTED', 'pending', 'verified'],
+    default: 'UNVERIFIED'
   },
+  verifiedAt: Date,
+  verifiedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  verificationNote: {
+    type: String,
+    default: ''
+  },
+  kycDocsComplete: {
+    type: Boolean,
+    default: false
+  },
+  vendorRatingBreakdown: {
+    1: { type: Number, default: 0 },
+    2: { type: Number, default: 0 },
+    3: { type: Number, default: 0 },
+    4: { type: Number, default: 0 },
+    5: { type: Number, default: 0 }
+  },
+  topRatedUpdatedAt: Date,
   privacy: {
     showPhone: {
       type: Boolean,
@@ -324,13 +428,17 @@ const vendorSchema = new mongoose.Schema({
 // Indexes
 vendorSchema.index({ status: 1 });
 vendorSchema.index({ accountStatus: 1 });
+vendorSchema.index({ vendorStatus: 1, createdAt: -1 });
 vendorSchema.index({ category: 1 });
 vendorSchema.index({ rating: -1 });
 vendorSchema.index({ totalSales: -1 });
+vendorSchema.index({ verificationStatus: 1 });
+vendorSchema.index({ createdAt: -1 });
 vendorSchema.index({ 'location.city': 1, 'location.state': 1 });
 vendorSchema.index({ storeName: 'text', description: 'text' });
 vendorSchema.index({ 'documents.status': 1 });
 vendorSchema.index({ 'complianceChecks.status': 1 });
+vendorSchema.index({ storeSlug: 1 }, { unique: true, sparse: true });
 
 // Generate slug before saving
 vendorSchema.pre('save', function(next) {
@@ -351,6 +459,17 @@ vendorSchema.pre('save', function(next) {
       .replace(/[^a-z0-9-]+/g, '-')
       .replace(/-+/g, '-')
       .replace(/^-+|-+$/g, '');
+  }
+
+  this.storeSlug = this.usernameSlug || this.slug;
+
+  if (this.bankDetails) {
+    if (!this.bankDetails.accountHolder && this.bankDetails.accountHolderName) {
+      this.bankDetails.accountHolder = this.bankDetails.accountHolderName;
+    }
+    if (!this.bankDetails.accountHolderName && this.bankDetails.accountHolder) {
+      this.bankDetails.accountHolderName = this.bankDetails.accountHolder;
+    }
   }
   next();
 });

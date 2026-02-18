@@ -99,6 +99,7 @@ const adminSupportRoutes = require('./routes/adminSupport');
 const adminReturnsRoutes = require('./routes/adminReturns');
 const adminPaymentProofRoutes = require('./routes/adminPaymentProofs');
 const disputeRoutes = require('./routes/disputes');
+const reportRoutes = require('./routes/reports');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -156,6 +157,7 @@ app.use('/api/alerts', alertsRoutes);
 app.use('/api/addresses', addressesRoutes);
 app.use('/api/checkout', checkoutRoutes);
 app.use('/api/disputes', disputeRoutes);
+app.use('/api/reports', reportRoutes);
 app.use('/api/content', contentRoutes);
 app.use('/api', productQaRoutes);
 app.use('/debug', debugRoutes);

@@ -6,6 +6,7 @@ const ProductHistory = require('../models/ProductHistory');
 const ProductAnalyticsEvent = require('../models/ProductAnalyticsEvent');
 const { notifyAdmins, notifyUser } = require('../services/notificationService');
 const { logActivity, logAudit, resolveIp } = require('../services/loggingService');
+const { evaluateFraudRules } = require('../services/trustSafetyService');
 const { detectProhibitedKeywords } = require('../utils/prohibitedRules');
 const { triggerPriceDropAlerts, triggerBackInStockAlerts } = require('../services/productAlertService');
 
@@ -499,6 +500,12 @@ exports.updateProduct = async (req, res, next) => {
     product.lastEditedAt = new Date();
     product.lastEditedBy = req.user.id;
     await product.save();
+    await evaluateFraudRules({
+      entityType: 'PRODUCT',
+      entityId: product._id,
+      createdBy: req.user.id,
+      product
+    });
     await Promise.all([
       triggerPriceDropAlerts({ product, oldPrice: previousPrice, newPrice: product.price }),
       triggerBackInStockAlerts({ product, oldStock: previousStock, newStock: product.stock })
@@ -541,6 +548,12 @@ exports.submitProductForReview = async (req, res, next) => {
     product.lastEditedAt = new Date();
     product.lastEditedBy = req.user.id;
     await product.save();
+    await evaluateFraudRules({
+      entityType: 'PRODUCT',
+      entityId: product._id,
+      createdBy: req.user.id,
+      product
+    });
 
     await createHistory({
       productId: product._id,

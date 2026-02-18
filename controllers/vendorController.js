@@ -35,11 +35,16 @@ async function applyVendorAccountStatus(vendor, user, accountStatus, reason, act
 
   if (accountStatus === 'active') {
     vendor.status = 'approved';
+    vendor.vendorStatus = 'ACTIVE';
+    vendor.verificationStatus = vendor.verificationStatus === 'REJECTED' ? 'UNVERIFIED' : (vendor.verificationStatus || 'VERIFIED');
     vendor.isActive = true;
     vendor.approvedAt = now;
     vendor.approvedBy = actorId;
+    vendor.approval = { approvedAt: now, approvedBy: actorId };
     vendor.rejectionReason = undefined;
     vendor.suspensionReason = undefined;
+    vendor.rejection = undefined;
+    vendor.suspension = undefined;
     vendor.suspendedAt = undefined;
     vendor.suspendedBy = undefined;
     vendor.bannedAt = undefined;
@@ -49,6 +54,8 @@ async function applyVendorAccountStatus(vendor, user, accountStatus, reason, act
     user.role = 'vendor';
   } else if (accountStatus === 'pending') {
     vendor.status = 'pending';
+    vendor.vendorStatus = 'PENDING';
+    vendor.verificationStatus = vendor.verificationStatus || 'UNVERIFIED';
     vendor.isActive = true;
     vendor.rejectionReason = reason || undefined;
     vendor.suspensionReason = undefined;
@@ -60,14 +67,21 @@ async function applyVendorAccountStatus(vendor, user, accountStatus, reason, act
     user.isBanned = false;
   } else if (accountStatus === 'suspended') {
     vendor.status = 'suspended';
+    vendor.vendorStatus = 'SUSPENDED';
     vendor.isActive = false;
     vendor.suspensionReason = reason || 'Suspended by admin';
     vendor.suspendedAt = now;
     vendor.suspendedBy = actorId;
+    vendor.suspension = {
+      suspendedAt: now,
+      suspendedBy: actorId,
+      suspensionReason: reason || 'Suspended by admin'
+    };
     user.isActive = false;
     user.isBanned = false;
   } else if (accountStatus === 'banned') {
     vendor.status = 'suspended';
+    vendor.vendorStatus = 'SUSPENDED';
     vendor.isActive = false;
     vendor.suspensionReason = reason || 'Banned by admin';
     vendor.bannedAt = now;
@@ -259,6 +273,7 @@ exports.createVendor = async (req, res, next) => {
     await notifyUser({
       user: req.user,
       type: 'APPROVAL',
+      subType: 'VENDOR_SUBMITTED',
       title: 'Vendor registration submitted',
       message: 'Your application is pending admin approval.',
       linkUrl: '/vendor/approval-status',
@@ -277,7 +292,8 @@ exports.createVendor = async (req, res, next) => {
     });
 
     await notifyAdmins({
-      type: 'APPROVAL',
+      type: 'SYSTEM',
+      subType: 'NEW_VENDOR_PENDING_APPROVAL',
       title: 'New vendor awaiting approval',
       message: `${vendor.storeName} submitted registration and needs review.`,
       linkUrl: `/admin/vendors`,
@@ -408,11 +424,15 @@ exports.getAllVendors = async (req, res, next) => {
       query.$text = { $search: req.query.search };
     }
 
-    let sort = '-createdAt';
+    const verifiedBoostEnabled = String(req.query.boostVerified || 'true').toLowerCase() !== 'false';
+    let sort = { createdAt: -1 };
     if (req.query.sort === 'rating') {
-      sort = '-rating';
+      sort = { rating: -1, createdAt: -1 };
     } else if (req.query.sort === 'sales') {
-      sort = '-totalSales';
+      sort = { totalSales: -1, createdAt: -1 };
+    }
+    if (verifiedBoostEnabled) {
+      sort = { verificationStatus: -1, ...sort };
     }
 
     const vendors = await Vendor.find(query)
@@ -681,6 +701,14 @@ exports.updateVendorStatus = async (req, res, next) => {
     await notifyUser({
       user,
       type: 'ACCOUNT',
+      subType:
+        accountStatus === 'suspended'
+          ? 'ACCOUNT_SUSPENDED'
+          : accountStatus === 'banned'
+            ? 'ACCOUNT_BANNED'
+            : accountStatus === 'active'
+              ? 'ACCOUNT_UNSUSPENDED'
+              : 'ACCOUNT_STATUS_UPDATED',
       title: 'Account status updated',
       message: `Your vendor account status is now ${accountStatus}.`,
       linkUrl: '/vendor/approval-status',
@@ -789,6 +817,19 @@ exports.uploadVendorDocument = async (req, res, next) => {
       performedByRole: req.user.role
     });
     await vendor.save();
+
+    await notifyAdmins({
+      type: 'SYSTEM',
+      subType: 'NEW_VENDOR_PENDING_APPROVAL',
+      title: 'New vendor document pending review',
+      message: `${vendor.storeName} uploaded ${req.body.type} for verification review.`,
+      linkUrl: `/admin/vendors/${vendor._id}`,
+      metadata: {
+        event: 'vendor.document.pending-review',
+        vendorId: vendor._id.toString(),
+        documentType: req.body.type
+      }
+    });
 
     res.status(201).json({
       success: true,
@@ -991,7 +1032,7 @@ exports.getVendorPerformanceOverview = async (req, res, next) => {
 
     const productCount = await Product.countDocuments({ vendor: vendor._id, isActive: true });
     const reviewSummary = await Review.aggregate([
-      { $match: { vendor: vendor._id, isApproved: true, isActive: true } },
+      { $match: { targetType: 'VENDOR', vendorId: vendor._id, status: 'APPROVED' } },
       {
         $group: {
           _id: null,
@@ -1080,7 +1121,7 @@ exports.getPublicVendorProfileBySlug = async (req, res, next) => {
       $or: [{ usernameSlug: req.params.slug }, { slug: req.params.slug }]
     }).populate('user', 'name avatar');
 
-    if (!vendor) {
+    if (!vendor || !isPublicVendor(vendor) || vendor.vendorStatus !== 'ACTIVE') {
       return res.status(404).json({
         success: false,
         message: 'Vendor profile not found'
@@ -1180,7 +1221,8 @@ exports.upsertVendorProfile = async (req, res, next) => {
       'privacy',
       'location',
       'address',
-      'policies'
+      'policies',
+      'bankDetails'
     ];
 
     fields.forEach((field) => {
@@ -1338,7 +1380,7 @@ exports.getVendorAnalytics = async (req, res, next) => {
     const productCount = await Product.countDocuments({ vendor: vendor._id });
     const activeProducts = await Product.countDocuments({
       vendor: vendor._id,
-      status: 'active'
+      status: 'PUBLISHED'
     });
 
     const analytics = {
@@ -1386,6 +1428,7 @@ exports.approveVendor = async (req, res, next) => {
     await notifyUser({
       user,
       type: 'APPROVAL',
+      subType: 'VENDOR_APPROVED',
       title: 'Vendor application approved',
       message: `${vendor.storeName} is approved and active.`,
       linkUrl: '/vendor/dashboard',
@@ -1436,8 +1479,15 @@ exports.rejectVendor = async (req, res, next) => {
     }
 
     vendor.status = 'rejected';
+    vendor.vendorStatus = 'REJECTED';
+    vendor.verificationStatus = 'REJECTED';
     vendor.accountStatus = 'suspended';
     vendor.rejectionReason = req.body.reason || 'Rejected by admin';
+    vendor.rejection = {
+      rejectedAt: new Date(),
+      rejectedBy: req.user.id,
+      rejectionReason: req.body.reason || 'Rejected by admin'
+    };
     vendor.statusUpdatedAt = new Date();
     vendor.statusUpdatedBy = req.user.id;
     vendor.isActive = false;
@@ -1462,6 +1512,7 @@ exports.rejectVendor = async (req, res, next) => {
       await notifyUser({
         user,
         type: 'APPROVAL',
+        subType: 'VENDOR_REJECTED',
         title: 'Vendor application rejected',
         message: req.body.reason
           ? `Reason: ${req.body.reason}`

@@ -44,7 +44,12 @@ const actionTypeEnum = [
   'DISPUTE_MESSAGE_ADD',
   'FRAUD_FLAG_CREATE',
   'FRAUD_FLAG_RESOLVE',
+  'FRAUD_FLAG_DISMISS',
+  'FRAUD_RULE_CREATE',
+  'FRAUD_RULE_UPDATE',
+  'FRAUD_RULE_DELETE',
   'REPORT_STATUS_UPDATE',
+  'REPORT_QUICK_ACTION',
   'CMS_PAGE_CREATE',
   'CMS_PAGE_UPDATE',
   'CMS_PAGE_DELETE',
@@ -59,12 +64,13 @@ const actionTypeEnum = [
   'HOMEPAGE_SECTION_REORDER',
   'ORDER_CHARGEBACK_OPEN',
   'ORDER_CHARGEBACK_RESOLVE',
+  'DISPUTE_RESOLVE',
   'NOTIFICATION_BROADCAST',
   'SYSTEM_ALERT_CREATED',
   'ADMIN_ALERT_CREATED'
 ];
 
-const targetTypeEnum = ['USER', 'VENDOR', 'PRODUCT', 'REVIEW', 'ORDER', 'DOCUMENT', 'SYSTEM', 'CATEGORY', 'CMS_PAGE', 'BANNER', 'HOMEPAGE_SECTION', 'REPORT', 'DISPUTE', 'REFUND', 'FRAUD_FLAG', 'PROHIBITED_RULE'];
+const targetTypeEnum = ['USER', 'VENDOR', 'PRODUCT', 'REVIEW', 'ORDER', 'DOCUMENT', 'SYSTEM', 'CATEGORY', 'CMS_PAGE', 'BANNER', 'HOMEPAGE_SECTION', 'REPORT', 'DISPUTE', 'REFUND', 'FRAUD_FLAG', 'FRAUD_RULE', 'PROHIBITED_RULE'];
 
 const auditLogSchema = new mongoose.Schema({
   actorId: {
@@ -83,7 +89,7 @@ const auditLogSchema = new mongoose.Schema({
   },
   entityType: {
     type: String,
-    enum: ['Conversation', 'Message', 'SupportTicket', 'Notification', 'Vendor', 'User', 'Order', 'System', 'Document', 'Product', 'Invoice', 'VendorTransaction', 'Review', 'Category', 'Cms_page', 'Banner', 'Homepage_section', 'Report', 'Dispute', 'Refund', 'Fraud_flag', 'Prohibited_rule'],
+    enum: ['Conversation', 'Message', 'SupportTicket', 'Notification', 'Vendor', 'User', 'Order', 'System', 'Document', 'Product', 'Invoice', 'VendorTransaction', 'Review', 'Category', 'Cms_page', 'Banner', 'Homepage_section', 'Report', 'Dispute', 'Refund', 'Fraud_flag', 'Fraud_rule', 'Prohibited_rule'],
     default: 'System'
   },
   entityId: {
