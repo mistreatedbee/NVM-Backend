@@ -10,6 +10,8 @@ const Invoice = require('../models/Invoice');
 const User = require('../models/User');
 const PromoCode = require('../models/PromoCode');
 const GiftCard = require('../models/GiftCard');
+const VendorCoupon = require('../models/VendorCoupon');
+const FlashSale = require('../models/FlashSale');
 const { notifyUser } = require('../services/notificationService');
 const { buildAppUrl } = require('../utils/appUrl');
 const { issueInvoicesForOrder } = require('../services/invoiceService');
@@ -20,6 +22,17 @@ function calculatePromoDiscount(subtotal, promo) {
   if (!promo) return 0;
   if (promo.discountType === 'PERCENT') return Math.max(0, Math.min(subtotal, (subtotal * promo.amount) / 100));
   return Math.max(0, Math.min(subtotal, promo.amount));
+}
+
+function normalizeVendorCouponInputs(payload = {}) {
+  if (Array.isArray(payload.vendorCoupons)) return payload.vendorCoupons;
+  if (Array.isArray(payload.vendorCouponCodes)) {
+    return payload.vendorCouponCodes.map((item) =>
+      typeof item === 'string' ? { code: item } : item
+    );
+  }
+  if (payload.vendorCouponCode) return [{ code: payload.vendorCouponCode, vendorId: payload.vendorId }];
+  return [];
 }
 
 // @desc    Create new order
@@ -50,6 +63,7 @@ exports.createOrder = async (req, res, next) => {
     let subtotal = 0;
     let shippingCost = 0;
     const orderItems = [];
+    const vendorSubtotals = new Map();
 
     for (const item of items) {
       const product = await Product.findById(item.product);
@@ -75,8 +89,20 @@ exports.createOrder = async (req, res, next) => {
         });
       }
 
-      const itemSubtotal = product.price * item.quantity;
+      const flashSale = await FlashSale.findOne({
+        active: true,
+        productIds: product._id,
+        startAt: { $lte: new Date() },
+        endAt: { $gte: new Date() }
+      }).select('discount');
+      const flashSaleDiscountPercent = flashSale ? Number(flashSale.discount || 0) : 0;
+      const unitPrice = flashSaleDiscountPercent > 0
+        ? Number((product.price * (1 - flashSaleDiscountPercent / 100)).toFixed(2))
+        : product.price;
+      const itemSubtotal = unitPrice * item.quantity;
       subtotal += itemSubtotal;
+      const vendorKey = String(product.vendor);
+      vendorSubtotals.set(vendorKey, (vendorSubtotals.get(vendorKey) || 0) + itemSubtotal);
       
       if (!product.shipping.freeShipping) {
         shippingCost += product.shipping.shippingCost || 0;
@@ -90,8 +116,8 @@ exports.createOrder = async (req, res, next) => {
         name: product.name,
         titleSnapshot: product.name,
         image: product.images[0]?.url,
-        price: product.price,
-        priceSnapshot: product.price,
+        price: unitPrice,
+        priceSnapshot: unitPrice,
         quantity: item.quantity,
         qty: item.quantity,
         variant: item.variant,
@@ -104,6 +130,7 @@ exports.createOrder = async (req, res, next) => {
 
     const tax = subtotal * 0.1; // 10% tax
     let discount = 0;
+    const appliedVendorCoupons = [];
 
     let promoDoc = null;
     if (promoCode) {
@@ -119,6 +146,25 @@ exports.createOrder = async (req, res, next) => {
         return res.status(400).json({ success: false, message: `Promo requires minimum spend of ${promoDoc.minSpend}` });
       }
       discount += calculatePromoDiscount(subtotal, promoDoc);
+    }
+
+    const vendorCouponInputs = normalizeVendorCouponInputs(req.body);
+    for (const input of vendorCouponInputs) {
+      const code = String(input?.code || '').trim().toUpperCase();
+      if (!code) continue;
+      const coupon = await VendorCoupon.findOne({ code, active: true });
+      if (!coupon) continue;
+      const now = new Date();
+      if (coupon.startAt && coupon.startAt > now) continue;
+      if (coupon.endAt && coupon.endAt < now) continue;
+      if (coupon.maxUses > 0 && coupon.usedCount >= coupon.maxUses) continue;
+
+      const vendorSubtotal = vendorSubtotals.get(String(coupon.vendorId)) || 0;
+      if (vendorSubtotal < (coupon.minSpend || 0)) continue;
+      const couponDiscount = calculatePromoDiscount(vendorSubtotal, coupon);
+      if (couponDiscount <= 0) continue;
+      discount += couponDiscount;
+      appliedVendorCoupons.push({ coupon, discount: couponDiscount });
     }
 
     let giftCardDoc = null;
@@ -165,6 +211,10 @@ exports.createOrder = async (req, res, next) => {
     if (promoDoc) {
       promoDoc.usedCount += 1;
       await promoDoc.save();
+    }
+    for (const entry of appliedVendorCoupons) {
+      entry.coupon.usedCount += 1;
+      await entry.coupon.save();
     }
     if (giftCardDoc && giftCardApplied > 0) {
       giftCardDoc.balance = Number(Math.max(0, giftCardDoc.balance - giftCardApplied).toFixed(2));

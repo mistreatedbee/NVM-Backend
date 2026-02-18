@@ -1117,7 +1117,7 @@ exports.getPublicVendorProfileBySlug = async (req, res, next) => {
       $or: [{ usernameSlug: req.params.slug }, { slug: req.params.slug }]
     }).populate('user', 'name avatar');
 
-    if (!vendor) {
+    if (!vendor || !isPublicVendor(vendor) || vendor.vendorStatus !== 'ACTIVE') {
       return res.status(404).json({
         success: false,
         message: 'Vendor profile not found'

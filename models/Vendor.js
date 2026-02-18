@@ -13,6 +13,13 @@ const vendorSchema = new mongoose.Schema({
     trim: true,
     maxlength: [100, 'Store name cannot be more than 100 characters']
   },
+  storeSlug: {
+    type: String,
+    unique: true,
+    sparse: true,
+    lowercase: true,
+    trim: true
+  },
   slug: {
     type: String,
     unique: true,
@@ -36,6 +43,11 @@ const vendorSchema = new mongoose.Schema({
   bio: {
     type: String,
     maxlength: [1000, 'Bio cannot be more than 1000 characters']
+  },
+  contact: {
+    phone: String,
+    email: String,
+    whatsapp: String
   },
   logo: {
     public_id: String,
@@ -98,14 +110,25 @@ const vendorSchema = new mongoose.Schema({
     facebook: String,
     instagram: String,
     tiktok: String,
-    website: String
+    website: String,
+    youtube: String
   },
   location: {
     country: String,
     state: String,
     city: String,
     suburb: String,
-    addressLine: String
+    addressLine: String,
+    province: String,
+    address: String,
+    lat: Number,
+    lng: Number
+  },
+  storePolicies: {
+    shippingPolicy: String,
+    returnsPolicy: String,
+    refundPolicy: String,
+    terms: String
   },
   
   // Banking Information (for EFT payments) - Optional but recommended
@@ -342,7 +365,10 @@ const vendorSchema = new mongoose.Schema({
     shippingPolicy: String,
     termsAndConditions: String
   },
-  businessHours: String,
+  businessHours: {
+    type: mongoose.Schema.Types.Mixed,
+    default: []
+  },
   policies: {
     returns: String,
     shipping: String
@@ -391,6 +417,7 @@ vendorSchema.index({ 'location.city': 1, 'location.state': 1 });
 vendorSchema.index({ storeName: 'text', description: 'text' });
 vendorSchema.index({ 'documents.status': 1 });
 vendorSchema.index({ 'complianceChecks.status': 1 });
+vendorSchema.index({ storeSlug: 1 }, { unique: true, sparse: true });
 
 // Generate slug before saving
 vendorSchema.pre('save', function(next) {
@@ -412,6 +439,8 @@ vendorSchema.pre('save', function(next) {
       .replace(/-+/g, '-')
       .replace(/^-+|-+$/g, '');
   }
+
+  this.storeSlug = this.usernameSlug || this.slug;
 
   if (this.bankDetails) {
     if (!this.bankDetails.accountHolder && this.bankDetails.accountHolderName) {

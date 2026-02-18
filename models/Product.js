@@ -83,7 +83,6 @@ const productSchema = new mongoose.Schema({
   // Inventory
   sku: {
     type: String,
-    unique: true,
     sparse: true
   },
   stock: {
@@ -217,6 +216,7 @@ const productSchema = new mongoose.Schema({
 
   submittedForReviewAt: Date,
   publishedAt: Date,
+  scheduledPublishAt: Date,
   publishedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
@@ -316,6 +316,8 @@ productSchema.index({ status: 1, isActive: 1, category: 1, price: 1 });
 productSchema.index({ featured: 1, status: 1, isActive: 1 });
 productSchema.index({ 'reports.status': 1 });
 productSchema.index({ title: 'text', name: 'text', description: 'text' });
+productSchema.index({ vendor: 1, sku: 1 }, { unique: true, sparse: true });
+productSchema.index({ status: 1, isActive: 1, scheduledPublishAt: 1 });
 
 // Generate slug before saving
 productSchema.pre('save', function(next) {
