@@ -14,6 +14,49 @@ function normalizeRole(role) {
   return String(role || '').toUpperCase();
 }
 
+function toSlug(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/** Create minimal vendor for user with vendor role but no Vendor document (so products/orders routes work even when called before getMyProfile). */
+async function ensureVendorForUser(user) {
+  let vendor = await Vendor.findOne({ user: user.id }).select(
+    'vendorStatus status accountStatus suspensionReason rejectionReason'
+  );
+  if (vendor) return vendor;
+  const slug = toSlug(user.name || user.email || user.id) + '-' + Date.now().toString(36);
+  vendor = await Vendor.create({
+    user: user.id,
+    storeName: 'My Store',
+    storeSlug: slug,
+    slug,
+    usernameSlug: slug,
+    description: 'Complete your store profile.',
+    category: 'other',
+    email: user.email || '',
+    phone: user.phone || '0000000000',
+    address: {
+      street: 'To be completed',
+      city: 'To be completed',
+      state: 'To be completed',
+      country: 'To be completed',
+      zipCode: 'To be completed'
+    },
+    status: 'approved',
+    accountStatus: 'active',
+    vendorStatus: 'ACTIVE',
+    isActive: true
+  });
+  return Vendor.findOne({ user: user.id }).select(
+    'vendorStatus status accountStatus suspensionReason rejectionReason'
+  );
+}
+
 exports.requireActiveVendorAccount = async (req, res, next) => {
   try {
     const role = normalizeRole(req.user?.role);
@@ -28,9 +71,13 @@ exports.requireActiveVendorAccount = async (req, res, next) => {
       });
     }
 
-    const vendor = await Vendor.findOne({ user: req.user.id }).select(
+    let vendor = await Vendor.findOne({ user: req.user.id }).select(
       'vendorStatus status accountStatus suspensionReason rejectionReason'
     );
+
+    if (!vendor) {
+      vendor = await ensureVendorForUser(req.user);
+    }
 
     if (!vendor) {
       return res.status(404).json({

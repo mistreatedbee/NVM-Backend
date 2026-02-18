@@ -17,18 +17,21 @@ const { enforceVendorPlanLimits } = require('../controllers/monetizationControll
 const VENDOR_CAN_UNPUBLISH = String(process.env.VENDOR_CAN_UNPUBLISH || 'false').toLowerCase() === 'true';
 const VENDOR_CAN_REPUBLISH = String(process.env.VENDOR_CAN_REPUBLISH || 'false').toLowerCase() === 'true';
 
-router.use(authenticate, isVendor, requireVerifiedEmail, requireActiveVendorAccount);
+router.use(authenticate, isVendor, requireActiveVendorAccount);
 
-router.post('/products', enforceVendorPlanLimits, productValidation, validate, createProduct);
+// Read operations: no email verification required so vendor dashboard loads
 router.get('/products', paginationValidation, validate, getMyProducts);
 router.get('/products/:productId', validateProductId, validate, getVendorProductById);
-router.put('/products/:productId', validateProductId, validate, updateProduct);
-router.post('/products/:productId/submit', validateProductId, validate, submitProductForReview);
+
+// Write operations: require verified email
+router.post('/products', requireVerifiedEmail, enforceVendorPlanLimits, productValidation, validate, createProduct);
+router.put('/products/:productId', requireVerifiedEmail, validateProductId, validate, updateProduct);
+router.post('/products/:productId/submit', requireVerifiedEmail, validateProductId, validate, submitProductForReview);
 if (VENDOR_CAN_UNPUBLISH) {
-  router.patch('/products/:productId/unpublish', validateProductId, validate, vendorUnpublishProduct);
+  router.patch('/products/:productId/unpublish', requireVerifiedEmail, validateProductId, validate, vendorUnpublishProduct);
 }
 if (VENDOR_CAN_REPUBLISH) {
-  router.patch('/products/:productId/publish', validateProductId, validate, vendorRepublishProduct);
+  router.patch('/products/:productId/publish', requireVerifiedEmail, validateProductId, validate, vendorRepublishProduct);
 }
 
 module.exports = router;

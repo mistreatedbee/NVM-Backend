@@ -1120,8 +1120,38 @@ exports.getVendorPerformanceOverview = async (req, res, next) => {
 // @access  Private (Vendor)
 exports.getMyVendorProfile = async (req, res, next) => {
   try {
-    const vendor = await Vendor.findOne({ user: req.user.id })
+    let vendor = await Vendor.findOne({ user: req.user.id })
       .populate('user', 'name email avatar');
+
+    // If user has vendor role but no Vendor document (e.g. admin set role), auto-create minimal profile so dashboard loads
+    const role = String(req.user.role || '').toLowerCase();
+    if (!vendor && role === 'vendor') {
+      const slug = toSlug(req.user.name || req.user.email || req.user.id.toString());
+      const uniqueSlug = `${slug}-${Date.now().toString(36)}`;
+      vendor = await Vendor.create({
+        user: req.user.id,
+        storeName: 'My Store',
+        storeSlug: uniqueSlug,
+        slug: uniqueSlug,
+        usernameSlug: uniqueSlug,
+        description: 'Complete your store profile.',
+        category: 'other',
+        email: req.user.email || '',
+        phone: req.user.phone || '0000000000',
+        address: {
+          street: 'To be completed',
+          city: 'To be completed',
+          state: 'To be completed',
+          country: 'To be completed',
+          zipCode: 'To be completed'
+        },
+        status: 'approved',
+        accountStatus: 'active',
+        vendorStatus: 'ACTIVE',
+        isActive: true
+      });
+      vendor = await Vendor.findById(vendor._id).populate('user', 'name email avatar');
+    }
 
     if (!vendor) {
       return res.status(404).json({
