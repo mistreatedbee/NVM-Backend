@@ -5,7 +5,7 @@ const Vendor = require('../models/Vendor');
 const Order = require('../models/Order');
 const HelpfulVote = require('../models/HelpfulVote');
 const ReviewReport = require('../models/ReviewReport');
-const AuditLog = require('../models/AuditLog');
+const { logActivity, logAudit, resolveIp } = require('../services/loggingService');
 
 const ALLOWED_SORT = new Set(['newest', 'highest', 'lowest', 'helpful']);
 const REVIEW_EDIT_WINDOW_DAYS = 30;
@@ -264,6 +264,20 @@ exports.createReview = async (req, res, next) => {
     };
 
     const review = await Review.create(payload);
+    await logActivity({
+      userId: req.user.id,
+      role: req.user.role,
+      action: 'REVIEW_CREATED',
+      entityType: 'REVIEW',
+      entityId: review._id,
+      metadata: {
+        targetType: review.targetType,
+        productId: review.productId || null,
+        vendorId: review.vendorId || null
+      },
+      ipAddress: resolveIp(req),
+      userAgent: req.headers['user-agent'] || ''
+    });
     await refreshTargetRating(review);
 
     return res.status(201).json({
@@ -543,21 +557,21 @@ exports.reportReview = async (req, res, next) => {
 };
 
 async function logAdminReviewAction({ req, review, action, reason }) {
-  return AuditLog.create({
+  return logAudit({
     actorAdminId: req.user.id,
-    actorId: req.user.id,
-    actorRole: 'Admin',
     actionType: action,
-    action: action,
-    entityType: 'Review',
-    entityId: review._id,
+    targetType: 'REVIEW',
+    targetId: review._id,
+    reason: reason || '',
     metadata: {
       reviewId: review._id.toString(),
       reason: reason || null,
       targetType: review.targetType,
       productId: review.productId ? review.productId.toString() : null,
       vendorId: review.vendorId ? review.vendorId.toString() : null
-    }
+    },
+    ipAddress: resolveIp(req),
+    userAgent: req.headers['user-agent'] || ''
   });
 }
 
@@ -579,6 +593,9 @@ exports.getAdminReviews = async (req, res, next) => {
       } else {
         query.status = req.query.status;
       }
+    }
+    if (String(req.query.reportedOnly || '').toLowerCase() === 'true') {
+      query.reportedCount = { $gt: 0 };
     }
     if (q) {
       query.$or = [{ title: { $regex: q, $options: 'i' } }, { body: { $regex: q, $options: 'i' } }];
@@ -693,6 +710,11 @@ exports.hideReview = async (req, res, next) => {
 // @access  Private (Admin)
 exports.adminDeleteReview = async (req, res, next) => {
   try {
+    const reason = sanitizeText(req.body?.reason || '');
+    if (!reason) {
+      return res.status(400).json({ success: false, message: 'reason is required' });
+    }
+
     const review = await Review.findById(req.params.reviewId || req.params.id);
     if (!review) {
       return res.status(404).json({ success: false, message: 'Review not found' });
@@ -706,7 +728,7 @@ exports.adminDeleteReview = async (req, res, next) => {
       req,
       review,
       action: 'REVIEW_DELETE',
-      reason: sanitizeText(req.body?.reason || '')
+      reason
     });
 
     return res.status(200).json({ success: true, message: 'Review deleted' });

@@ -3,9 +3,10 @@ const Vendor = require('../models/Vendor');
 const User = require('../models/User');
 const Category = require('../models/Category');
 const ProductHistory = require('../models/ProductHistory');
-const AuditLog = require('../models/AuditLog');
 const ProductAnalyticsEvent = require('../models/ProductAnalyticsEvent');
 const { notifyAdmins, notifyUser } = require('../services/notificationService');
+const { logActivity, logAudit, resolveIp } = require('../services/loggingService');
+const { detectProhibitedKeywords } = require('../utils/prohibitedRules');
 
 const PRODUCT_STATUS = {
   DRAFT: 'DRAFT',
@@ -91,16 +92,15 @@ async function createHistory({ productId, actorId, actorRole, action, previousSt
 }
 
 async function createProductAuditLog({ req, actionType, productId, metadata }) {
-  await AuditLog.create({
+  await logAudit({
     actorAdminId: req.user.id,
-    actorId: req.user.id,
-    actorRole: 'Admin',
     actionType,
-    action: actionType,
-    targetProductId: productId,
-    entityType: 'Product',
-    entityId: productId,
-    metadata
+    targetType: 'PRODUCT',
+    targetId: productId,
+    reason: metadata?.reason || '',
+    metadata: metadata || {},
+    ipAddress: resolveIp(req),
+    userAgent: req.headers['user-agent'] || ''
   });
 }
 
@@ -167,6 +167,17 @@ exports.createProduct = async (req, res, next) => {
       lastEditedBy: req.user.id
     });
 
+    await logActivity({
+      userId: req.user.id,
+      role: req.user.role,
+      action: 'PRODUCT_CREATE',
+      entityType: 'PRODUCT',
+      entityId: product._id,
+      metadata: { title: product.name, status: product.status },
+      ipAddress: resolveIp(req),
+      userAgent: req.headers['user-agent'] || ''
+    });
+
     await createHistory({
       productId: product._id,
       actorId: req.user.id,
@@ -197,7 +208,15 @@ exports.getMyProducts = async (req, res, next) => {
     const skip = (page - 1) * limit;
     const query = { vendor: vendor._id };
 
-    if (req.query.status && req.query.status !== 'all') query.status = req.query.status;
+    if (req.query.status && req.query.status !== 'all') {
+      if (req.query.status === 'FLAGGED') {
+        query.reportCount = { $gt: 0 };
+      } else if (req.query.status === 'UNPUBLISHED') {
+        query.isActive = false;
+      } else {
+        query.status = req.query.status;
+      }
+    }
     if (req.query.isActive === 'true' || req.query.isActive === 'false') query.isActive = req.query.isActive === 'true';
     if (req.query.q) {
       query.$or = [
@@ -505,6 +524,17 @@ exports.submitProductForReview = async (req, res, next) => {
       changes: { submittedForReviewAt: product.submittedForReviewAt }
     });
 
+    await logActivity({
+      userId: req.user.id,
+      role: req.user.role,
+      action: 'PRODUCT_CREATE',
+      entityType: 'PRODUCT',
+      entityId: product._id,
+      metadata: { title: product.name, status: product.status, submittedForReviewAt: product.submittedForReviewAt },
+      ipAddress: resolveIp(req),
+      userAgent: req.headers['user-agent'] || ''
+    });
+
     const vendor = await Vendor.findById(product.vendor).select('storeName');
     await notifyAdmins({
       type: 'APPROVAL',
@@ -760,12 +790,54 @@ exports.adminRepublishProduct = async (req, res, next) => {
       changes: { isActive: { from: false, to: true } }
     });
 
-    await createProductAuditLog({ req, actionType: 'PRODUCT_PUBLISH', productId: product._id, metadata: { status: product.status, isActive: true } });
+    await createProductAuditLog({ req, actionType: 'PRODUCT_REPUBLISH', productId: product._id, metadata: { status: product.status, isActive: true } });
 
     const populated = await populateProduct(product);
     return res.status(200).json({ success: true, data: populated });
   } catch (error) {
     next(error);
+  }
+};
+
+exports.adminFlagProduct = async (req, res, next) => {
+  try {
+    const product = await Product.findById(req.params.productId);
+    if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
+
+    const reason = String(req.body?.reason || '').trim();
+    const severity = String(req.body?.severity || 'MEDIUM').toUpperCase();
+    if (!reason) return res.status(400).json({ success: false, message: 'reason is required' });
+    if (!['LOW', 'MEDIUM', 'HIGH'].includes(severity)) {
+      return res.status(400).json({ success: false, message: 'severity must be LOW, MEDIUM, or HIGH' });
+    }
+
+    const prohibitedHits = detectProhibitedKeywords(`${product.name || ''} ${product.description || ''}`);
+    product.reports.push({
+      reporter: req.user.id,
+      reason: 'other',
+      details: `[ADMIN_FLAG][${severity}] ${reason}${prohibitedHits.length ? ` | prohibitedKeywords: ${prohibitedHits.join(', ')}` : ''}`,
+      status: 'open'
+    });
+    product.reportCount = product.reports.filter((report) => report.status === 'open').length;
+    product.isActive = false;
+    product.lastEditedAt = new Date();
+    product.lastEditedBy = req.user.id;
+    await product.save();
+
+    await createProductAuditLog({
+      req,
+      actionType: 'PRODUCT_FLAG',
+      productId: product._id,
+      metadata: {
+        reason,
+        severity,
+        prohibitedKeywords: prohibitedHits
+      }
+    });
+
+    return res.status(200).json({ success: true, data: product });
+  } catch (error) {
+    return next(error);
   }
 };
 

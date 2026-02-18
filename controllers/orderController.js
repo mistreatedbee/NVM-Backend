@@ -11,6 +11,7 @@ const { notifyUser } = require('../services/notificationService');
 const { buildAppUrl } = require('../utils/appUrl');
 const { issueInvoicesForOrder } = require('../services/invoiceService');
 const { recordPurchaseEventsForOrder } = require('../services/productAnalyticsService');
+const { logActivity, resolveIp } = require('../services/loggingService');
 
 // @desc    Create new order
 // @route   POST /api/orders
@@ -108,6 +109,21 @@ exports.createOrder = async (req, res, next) => {
         total
       },
       customerNotes
+    });
+
+    await logActivity({
+      userId: req.user.id,
+      role: req.user.role,
+      action: 'ORDER_PLACED',
+      entityType: 'ORDER',
+      entityId: order._id,
+      metadata: {
+        orderNumber: order.orderNumber,
+        total: order.total,
+        itemsCount: order.items?.length || 0
+      },
+      ipAddress: resolveIp(req),
+      userAgent: req.headers['user-agent'] || ''
     });
 
     if (paymentMethod === 'cash-on-delivery') {

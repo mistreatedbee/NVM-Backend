@@ -3,6 +3,7 @@ const User = require('../models/User');
 const { generateToken } = require('../utils/jwt');
 const { notifyUser, safeSendTemplateEmail } = require('../services/notificationService');
 const { buildAppUrl } = require('../utils/appUrl');
+const { logActivity, resolveIp } = require('../services/loggingService');
 
 function hashToken(rawToken) {
   return crypto.createHash('sha256').update(rawToken).digest('hex');
@@ -94,6 +95,17 @@ exports.register = async (req, res, next) => {
       isVerified: false
     });
 
+    await logActivity({
+      userId: user._id,
+      role: user.role,
+      action: 'REGISTER',
+      entityType: 'USER',
+      entityId: user._id,
+      metadata: { email: user.email },
+      ipAddress: resolveIp(req),
+      userAgent: req.headers['user-agent'] || ''
+    });
+
     await queueVerification(user, 'Customer');
 
     const token = generateToken(user._id);
@@ -137,6 +149,17 @@ exports.login = async (req, res, next) => {
 
     user.lastLogin = new Date();
     await user.save();
+
+    await logActivity({
+      userId: user._id,
+      role: user.role,
+      action: 'LOGIN',
+      entityType: 'USER',
+      entityId: user._id,
+      metadata: { email: user.email },
+      ipAddress: resolveIp(req),
+      userAgent: req.headers['user-agent'] || ''
+    });
 
     res.status(200).json(safeAuthResponse(user, token, message));
   } catch (error) {
@@ -332,6 +355,17 @@ exports.resetPassword = async (req, res, next) => {
     user.resetPasswordExpire = undefined;
     await user.save();
 
+    await logActivity({
+      userId: user._id,
+      role: user.role,
+      action: 'PASSWORD_RESET',
+      entityType: 'USER',
+      entityId: user._id,
+      metadata: { via: 'token' },
+      ipAddress: resolveIp(req),
+      userAgent: req.headers['user-agent'] || ''
+    });
+
     await safeSendTemplateEmail({
       to: user.email,
       templateId: 'password_changed',
@@ -364,6 +398,17 @@ exports.updateProfile = async (req, res, next) => {
       { name, phone, avatar },
       { new: true, runValidators: true }
     );
+
+    await logActivity({
+      userId: user._id,
+      role: user.role,
+      action: 'PROFILE_UPDATED',
+      entityType: 'USER',
+      entityId: user._id,
+      metadata: { fields: ['name', 'phone', 'avatar'].filter((field) => req.body[field] !== undefined) },
+      ipAddress: resolveIp(req),
+      userAgent: req.headers['user-agent'] || ''
+    });
 
     res.status(200).json({ success: true, data: user });
   } catch (error) {

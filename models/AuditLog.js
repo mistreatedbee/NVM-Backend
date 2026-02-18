@@ -1,7 +1,40 @@
-const mongoose = require('mongoose');
+﻿const mongoose = require('mongoose');
+
+const actionTypeEnum = [
+  'USER_BAN',
+  'USER_UNBAN',
+  'USER_SUSPEND',
+  'USER_UNSUSPEND',
+  'USER_ROLE_CHANGE',
+  'ADMIN_EDIT_USER',
+  'ADMIN_EDIT_VENDOR',
+  'VENDOR_APPROVE',
+  'VENDOR_REJECT',
+  'VENDOR_SUSPEND',
+  'VENDOR_UNSUSPEND',
+  'VENDOR_VERIFY',
+  'VENDOR_UNVERIFY',
+  'VENDOR_COMPLIANCE_REVIEW',
+  'PRODUCT_APPROVE',
+  'PRODUCT_REJECT',
+  'PRODUCT_UNPUBLISH',
+  'PRODUCT_REPUBLISH',
+  'PRODUCT_FLAG',
+  'PRODUCT_REMOVE',
+  'REVIEW_APPROVE',
+  'REVIEW_REJECT',
+  'REVIEW_HIDE',
+  'REVIEW_DELETE',
+  'DOC_APPROVE',
+  'DOC_REJECT',
+  'NOTIFICATION_BROADCAST',
+  'SYSTEM_ALERT_CREATED',
+  'ADMIN_ALERT_CREATED'
+];
+
+const targetTypeEnum = ['USER', 'VENDOR', 'PRODUCT', 'REVIEW', 'ORDER', 'DOCUMENT', 'SYSTEM'];
 
 const auditLogSchema = new mongoose.Schema({
-  // Legacy/general audit shape
   actorId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -26,7 +59,6 @@ const auditLogSchema = new mongoose.Schema({
     default: null
   },
 
-  // Vendor-management audit shape
   actorAdminId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -34,28 +66,16 @@ const auditLogSchema = new mongoose.Schema({
   },
   actionType: {
     type: String,
-    enum: [
-      'VENDOR_APPROVE',
-      'VENDOR_REJECT',
-      'VENDOR_SUSPEND',
-      'VENDOR_UNSUSPEND',
-      'DOC_APPROVE',
-      'DOC_REJECT',
-      'VENDOR_VERIFY',
-      'VENDOR_UNVERIFY',
-      'ADMIN_EDIT_VENDOR',
-      'PRODUCT_APPROVE',
-      'PRODUCT_REJECT',
-      'PRODUCT_UNPUBLISH',
-      'PRODUCT_PUBLISH',
-      'PRODUCT_FLAG',
-      'REVIEW_APPROVE',
-      'REVIEW_REJECT',
-      'REVIEW_HIDE',
-      'REVIEW_DELETE',
-      'NOTIFICATION_BROADCAST',
-      'ADMIN_ALERT_CREATED'
-    ],
+    enum: actionTypeEnum,
+    default: null
+  },
+  targetType: {
+    type: String,
+    enum: targetTypeEnum,
+    default: null
+  },
+  targetId: {
+    type: mongoose.Schema.Types.ObjectId,
     default: null
   },
   targetVendorId: {
@@ -68,16 +88,33 @@ const auditLogSchema = new mongoose.Schema({
     ref: 'Product',
     default: null
   },
+  reason: {
+    type: String,
+    maxlength: 1000,
+    default: ''
+  },
+  ipAddress: {
+    type: String,
+    default: ''
+  },
+  userAgent: {
+    type: String,
+    default: ''
+  },
   metadata: mongoose.Schema.Types.Mixed
 }, {
   timestamps: { createdAt: true, updatedAt: false }
 });
 
+auditLogSchema.index({ targetType: 1, targetId: 1, createdAt: -1 });
+auditLogSchema.index({ actorAdminId: 1, createdAt: -1 });
+auditLogSchema.index({ actionType: 1, createdAt: -1 });
+auditLogSchema.index({ createdAt: -1 });
+
+// Legacy indexes retained for backward compatibility.
 auditLogSchema.index({ entityType: 1, entityId: 1, createdAt: -1 });
 auditLogSchema.index({ action: 1, createdAt: -1 });
 auditLogSchema.index({ targetVendorId: 1, createdAt: -1 });
 auditLogSchema.index({ targetProductId: 1, createdAt: -1 });
-auditLogSchema.index({ actorAdminId: 1, createdAt: -1 });
-auditLogSchema.index({ actionType: 1, createdAt: -1 });
 
 module.exports = mongoose.model('AuditLog', auditLogSchema);

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate, isVendor } = require('../middleware/auth');
+const { requireActiveVendorAccount } = require('../middleware/requireActiveVendorAccount');
 const {
   getVendorInvoices,
   getVendorInvoiceById,
@@ -8,9 +9,9 @@ const {
 } = require('../controllers/invoiceController');
 const { getVendorTransactions } = require('../controllers/financeController');
 
-router.get('/invoices', authenticate, isVendor, getVendorInvoices);
-router.get('/invoices/:invoiceId', authenticate, isVendor, getVendorInvoiceById);
-router.get('/invoices/:invoiceId/pdf', authenticate, isVendor, downloadVendorInvoicePdf);
-router.get('/transactions', authenticate, isVendor, getVendorTransactions);
+router.get('/invoices', authenticate, isVendor, requireActiveVendorAccount, getVendorInvoices);
+router.get('/invoices/:invoiceId', authenticate, isVendor, requireActiveVendorAccount, getVendorInvoiceById);
+router.get('/invoices/:invoiceId/pdf', authenticate, isVendor, requireActiveVendorAccount, downloadVendorInvoicePdf);
+router.get('/transactions', authenticate, isVendor, requireActiveVendorAccount, getVendorTransactions);
 
 module.exports = router;

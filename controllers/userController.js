@@ -1,8 +1,8 @@
 const User = require('../models/User');
 const Vendor = require('../models/Vendor');
-const AuditLog = require('../models/AuditLog');
 const { notifyUser } = require('../services/notificationService');
 const { buildAppUrl } = require('../utils/appUrl');
+const { logActivity, logAudit, resolveIp } = require('../services/loggingService');
 
 // @desc    Get all users
 // @route   GET /api/users
@@ -80,13 +80,15 @@ exports.ban = async (req, res, next) => {
       }
     });
 
-    await AuditLog.create({
-      actorId: req.user.id,
-      actorRole: 'Admin',
-      action: 'user.banned',
-      entityType: 'User',
-      entityId: user._id,
-      metadata: { userId: user._id }
+    await logAudit({
+      actorAdminId: req.user.id,
+      actionType: 'USER_BAN',
+      targetType: 'USER',
+      targetId: user._id,
+      reason: req.body?.reason || '',
+      metadata: { userId: user._id.toString(), previous: { isBanned: false, isActive: true }, next: { isBanned: true, isActive: false } },
+      ipAddress: resolveIp(req),
+      userAgent: req.headers['user-agent'] || ''
     });
 
     res.status(200).json({ success: true, message: 'User banned successfully', data: user });
@@ -127,13 +129,14 @@ exports.unban = async (req, res, next) => {
       }
     });
 
-    await AuditLog.create({
-      actorId: req.user.id,
-      actorRole: 'Admin',
-      action: 'user.unbanned',
-      entityType: 'User',
-      entityId: user._id,
-      metadata: { userId: user._id }
+    await logAudit({
+      actorAdminId: req.user.id,
+      actionType: 'USER_UNBAN',
+      targetType: 'USER',
+      targetId: user._id,
+      metadata: { userId: user._id.toString(), previous: { isBanned: true, isActive: false }, next: { isBanned: false, isActive: true } },
+      ipAddress: resolveIp(req),
+      userAgent: req.headers['user-agent'] || ''
     });
 
     res.status(200).json({ success: true, message: 'User unbanned successfully', data: user });
@@ -197,6 +200,17 @@ exports.updateProfile = async (req, res, next) => {
     if (addresses) user.addresses = addresses;
 
     await user.save();
+
+    await logActivity({
+      userId: user._id,
+      role: user.role,
+      action: 'PROFILE_UPDATED',
+      entityType: 'USER',
+      entityId: user._id,
+      metadata: { fields: ['name', 'phone', 'addresses'].filter((field) => req.body[field] !== undefined) },
+      ipAddress: resolveIp(req),
+      userAgent: req.headers['user-agent'] || ''
+    });
 
     res.status(200).json({
       success: true,

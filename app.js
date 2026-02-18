@@ -82,6 +82,7 @@ const vendorDashboardRoutes = require('./routes/vendorDashboard');
 const wishlistRoutes = require('./routes/wishlist');
 const cartRoutes = require('./routes/cart');
 const recentlyViewedRoutes = require('./routes/recentlyViewed');
+const adminControlRoutes = require('./routes/adminControl');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -104,6 +105,7 @@ app.use('/api/admin', adminKnowledgeRoutes);
 app.use('/api/admin', adminPostsRoutes);
 app.use('/api/admin', adminPlaybookRoutes);
 app.use('/api/admin', adminDashboardRoutes);
+app.use('/api/admin', adminControlRoutes);
 app.use('/api/vendor', vendorDocumentsRoutes);
 app.use('/api/vendor', vendorProductsRoutes);
 app.use('/api/vendor', vendorOrdersRoutes);

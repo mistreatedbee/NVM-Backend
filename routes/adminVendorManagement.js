@@ -13,8 +13,7 @@ const {
   getAdminVendorDocuments,
   approveDocument,
   rejectDocument,
-  getAdminVendorMetrics,
-  getAdminAuditLogs
+  getAdminVendorMetrics
 } = require('../controllers/vendorAdminController');
 
 router.use(authenticate, isAdmin);
@@ -32,6 +31,5 @@ router.patch('/documents/:docId/approve', validateDocumentId, validate, approveD
 router.patch('/documents/:docId/reject', validateDocumentId, validate, rejectDocument);
 
 router.get('/vendors/:vendorId/metrics', validateVendorId, validate, getAdminVendorMetrics);
-router.get('/audit-logs', paginationValidation, validate, getAdminAuditLogs);
 
 module.exports = router;

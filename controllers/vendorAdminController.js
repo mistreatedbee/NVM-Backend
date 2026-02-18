@@ -8,6 +8,7 @@ const VendorDocument = require('../models/VendorDocument');
 const cloudinary = require('../utils/cloudinary');
 const { notifyUser } = require('../services/notificationService');
 const { buildAppUrl } = require('../utils/appUrl');
+const { logAudit, resolveIp } = require('../services/loggingService');
 
 const DOC_TYPES = new Set(['BUSINESS_REG', 'COMPLIANCE', 'ID', 'TAX', 'OTHER']);
 
@@ -41,16 +42,15 @@ function mapVendorStatuses(vendor) {
 }
 
 async function createAdminAuditLog({ req, actionType, targetVendorId, metadata }) {
-  return AuditLog.create({
+  return logAudit({
     actorAdminId: req.user.id,
-    actorId: req.user.id,
-    actorRole: 'Admin',
     actionType,
-    action: actionType,
-    targetVendorId,
-    entityType: 'Vendor',
-    entityId: targetVendorId,
-    metadata: metadata || {}
+    targetType: 'VENDOR',
+    targetId: targetVendorId,
+    reason: metadata?.reason || '',
+    metadata: metadata || {},
+    ipAddress: resolveIp(req),
+    userAgent: req.headers['user-agent'] || ''
   });
 }
 

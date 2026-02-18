@@ -9,7 +9,8 @@ const {
   approveProduct,
   rejectProduct,
   adminUnpublishProduct,
-  adminRepublishProduct
+  adminRepublishProduct,
+  adminFlagProduct
 } = require('../controllers/productController');
 
 router.use(authenticate, isAdmin);
@@ -24,7 +25,21 @@ router.patch(
   validate,
   rejectProduct
 );
-router.patch('/products/:productId/unpublish', validateProductId, validate, adminUnpublishProduct);
+router.patch(
+  '/products/:productId/unpublish',
+  validateProductId,
+  body('reason').trim().notEmpty().withMessage('reason is required'),
+  validate,
+  adminUnpublishProduct
+);
 router.patch('/products/:productId/republish', validateProductId, validate, adminRepublishProduct);
+router.patch(
+  '/products/:productId/flag',
+  validateProductId,
+  body('reason').trim().notEmpty().withMessage('reason is required'),
+  body('severity').optional().isIn(['LOW', 'MEDIUM', 'HIGH']).withMessage('severity must be LOW, MEDIUM or HIGH'),
+  validate,
+  adminFlagProduct
+);
 
 module.exports = router;
