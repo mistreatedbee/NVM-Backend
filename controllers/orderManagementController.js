@@ -7,6 +7,7 @@ const { notifyUser } = require('../services/notificationService');
 const { buildAppUrl } = require('../utils/appUrl');
 const { issueInvoicesForOrder } = require('../services/invoiceService');
 const { recordPurchaseEventsForOrder } = require('../services/productAnalyticsService');
+const { applyCommissionToOrder } = require('../services/commissionService');
 
 // @desc    Upload payment proof
 // @route   POST /api/orders/:orderId/payment-proof
@@ -112,6 +113,7 @@ exports.confirmPayment = async (req, res, next) => {
     order.confirmedAt = new Date();
 
     await order.save();
+    await applyCommissionToOrder(order);
     await recordPurchaseEventsForOrder({ order, source: 'DIRECT', actorUserId: req.user.id });
     await issueInvoicesForOrder({ orderId: order._id, actorId: req.user.id });
 

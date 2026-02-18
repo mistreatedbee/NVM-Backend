@@ -7,6 +7,7 @@ const AuditLog = require('../models/AuditLog');
 const { notifyUser, notifyAdmins } = require('../services/notificationService');
 const cloudinary = require('../utils/cloudinary');
 const { buildAppUrl } = require('../utils/appUrl');
+const { createCacheKey, getCached, setCached } = require('../utils/cache');
 
 function addActivityLog(vendor, { action, message, metadata, performedBy, performedByRole }) {
   if (!Array.isArray(vendor.activityLogs)) {
@@ -449,6 +450,76 @@ exports.getAllVendors = async (req, res, next) => {
     });
   } catch (error) {
     next(error);
+  }
+};
+
+// @desc    Get vendors nearby
+// @route   GET /api/vendors/nearby
+// @access  Public
+exports.getNearbyVendors = async (req, res, next) => {
+  try {
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    const radiusKm = Math.max(Number(req.query.radiusKm) || 20, 1);
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
+    const skip = (page - 1) * limit;
+    const search = String(req.query.q || '').trim();
+    const category = String(req.query.category || '').trim();
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return res.status(400).json({ success: false, message: 'lat and lng query params are required' });
+    }
+
+    const cacheKey = createCacheKey('vendors:nearby', {
+      lat, lng, radiusKm, page, limit, search, category
+    });
+    const cached = getCached(cacheKey);
+    if (cached) {
+      return res.status(200).json({ success: true, ...cached, cached: true });
+    }
+
+    const vendorQuery = {
+      vendorStatus: 'ACTIVE',
+      geoLocation: {
+        $near: {
+          $geometry: { type: 'Point', coordinates: [lng, lat] },
+          $maxDistance: radiusKm * 1000
+        }
+      }
+    };
+
+    if (search) {
+      vendorQuery.$or = [
+        { storeName: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    if (category) {
+      const productVendorIds = await Product.distinct('vendor', {
+        category: { $regex: `^${category}$`, $options: 'i' },
+        isActive: true
+      });
+      vendorQuery._id = { $in: productVendorIds };
+    }
+
+    const [vendors, total] = await Promise.all([
+      Vendor.find(vendorQuery).skip(skip).limit(limit),
+      Vendor.countDocuments(vendorQuery)
+    ]);
+
+    const payload = {
+      data: vendors,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1
+    };
+    setCached(cacheKey, payload, 5 * 60 * 1000);
+    return res.status(200).json({ success: true, ...payload });
+  } catch (error) {
+    return next(error);
   }
 };
 

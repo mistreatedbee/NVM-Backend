@@ -4,6 +4,9 @@ const { generateToken } = require('../utils/jwt');
 const { notifyUser, safeSendTemplateEmail } = require('../services/notificationService');
 const { buildAppUrl } = require('../utils/appUrl');
 const { logActivity, resolveIp } = require('../services/loggingService');
+const { generateSecret, verifyTotpCode, encryptSecret, decryptSecret, buildOtpAuthUrl } = require('../utils/totp');
+const ReferralCode = require('../models/ReferralCode');
+const ReferralEvent = require('../models/ReferralEvent');
 
 function hashToken(rawToken) {
   return crypto.createHash('sha256').update(rawToken).digest('hex');
@@ -79,7 +82,7 @@ async function queueVerification(user, actorRole = 'System', templateId = 'verif
 // @access  Public
 exports.register = async (req, res, next) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, referralCode } = req.body;
 
     const normalizedEmail = String(email || '').toLowerCase().trim();
     const userExists = await User.findOne({ email: normalizedEmail });
@@ -107,6 +110,18 @@ exports.register = async (req, res, next) => {
     });
 
     await queueVerification(user, 'Customer');
+
+    const normalizedReferralCode = String(referralCode || '').trim().toUpperCase();
+    if (normalizedReferralCode) {
+      const code = await ReferralCode.findOne({ code: normalizedReferralCode, active: true });
+      if (code) {
+        await ReferralEvent.create({
+          code: normalizedReferralCode,
+          referredUserId: user._id,
+          status: 'PENDING'
+        });
+      }
+    }
 
     const token = generateToken(user._id);
     res.status(201).json(safeAuthResponse(user, token, 'Account created. Check your email to verify.'));
@@ -140,6 +155,22 @@ exports.login = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
+    const roleNeedsTwoFactor = ['admin', 'vendor'].includes(String(user.role));
+    if (roleNeedsTwoFactor && user.twoFactorEnabled) {
+      const twoFactorCode = String(req.body?.twoFactorCode || '').trim();
+      if (!twoFactorCode) {
+        return res.status(200).json({
+          success: true,
+          requiresTwoFactor: true,
+          message: 'Two-factor code required to complete login'
+        });
+      }
+      const secret = decryptSecret(user.twoFactorSecretEncrypted);
+      if (!secret || !verifyTotpCode(secret, twoFactorCode)) {
+        return res.status(401).json({ success: false, message: 'Invalid two-factor code' });
+      }
+    }
+
     const token = generateToken(user._id);
     const message = user.role === 'admin'
       ? 'Admin credentials verified and vetted. Access granted.'
@@ -164,6 +195,86 @@ exports.login = async (req, res, next) => {
     res.status(200).json(safeAuthResponse(user, token, message));
   } catch (error) {
     next(error);
+  }
+};
+
+// @desc    Setup 2FA
+// @route   POST /api/auth/2fa/setup
+// @access  Private (Admin/Vendor)
+exports.setupTwoFactor = async (req, res, next) => {
+  try {
+    if (!['admin', 'vendor'].includes(String(req.user.role))) {
+      return res.status(403).json({ success: false, message: '2FA setup is only available for admin and vendor accounts' });
+    }
+
+    const user = await User.findById(req.user.id);
+    const secret = generateSecret();
+    user.twoFactorSecretEncrypted = encryptSecret(secret);
+    user.twoFactorEnabled = false;
+    await user.save();
+
+    const issuer = process.env.TWO_FACTOR_ISSUER || 'NVM Marketplace';
+    const otpauthUrl = buildOtpAuthUrl({ issuer, account: user.email, secret });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        secret,
+        otpauthUrl,
+        manualEntryKey: secret
+      }
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+// @desc    Verify/enable 2FA
+// @route   POST /api/auth/2fa/verify
+// @access  Private (Admin/Vendor)
+exports.verifyTwoFactor = async (req, res, next) => {
+  try {
+    const token = String(req.body?.token || '').trim();
+    if (!token) return res.status(400).json({ success: false, message: 'token is required' });
+
+    const user = await User.findById(req.user.id);
+    const secret = decryptSecret(user.twoFactorSecretEncrypted);
+    if (!secret) return res.status(400).json({ success: false, message: '2FA setup has not been initialized' });
+    if (!verifyTotpCode(secret, token)) return res.status(400).json({ success: false, message: 'Invalid token' });
+
+    user.twoFactorEnabled = true;
+    await user.save();
+
+    return res.status(200).json({ success: true, message: 'Two-factor authentication enabled' });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+// @desc    Disable 2FA
+// @route   POST /api/auth/2fa/disable
+// @access  Private (Admin/Vendor)
+exports.disableTwoFactor = async (req, res, next) => {
+  try {
+    const token = String(req.body?.token || '').trim();
+    const user = await User.findById(req.user.id);
+
+    if (!user.twoFactorEnabled) {
+      return res.status(400).json({ success: false, message: '2FA is not enabled' });
+    }
+
+    const secret = decryptSecret(user.twoFactorSecretEncrypted);
+    if (!secret || !verifyTotpCode(secret, token)) {
+      return res.status(400).json({ success: false, message: 'Invalid token' });
+    }
+
+    user.twoFactorEnabled = false;
+    user.twoFactorSecretEncrypted = '';
+    await user.save();
+
+    return res.status(200).json({ success: true, message: 'Two-factor authentication disabled' });
+  } catch (error) {
+    return next(error);
   }
 };
 

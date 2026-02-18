@@ -1,41 +1,38 @@
-import AuditLog from '../models/AuditLog.js';
+const AuditLog = require('../models/AuditLog');
 
-export const createAuditLog = async (req, action, entity, entityId, changes = null) => {
+async function createAuditLog(req, action, entityType, entityId, metadata = {}) {
   try {
-    if (!req.user) return; // Skip if no user (public routes)
-
+    if (!req.user) return;
     await AuditLog.create({
+      actorId: req.user._id,
+      actorRole: req.user.role === 'admin' ? 'Admin' : req.user.role === 'vendor' ? 'Vendor' : 'Customer',
       action,
-      entity,
-      entityId,
-      user: req.user._id,
-      changes,
-      ipAddress: req.ip || req.connection.remoteAddress,
-      userAgent: req.get('user-agent'),
-      metadata: {
-        method: req.method,
-        path: req.path,
-        body: req.method !== 'GET' ? req.body : undefined
-      }
+      entityType: entityType || 'System',
+      entityId: entityId || null,
+      metadata,
+      ipAddress: req.ip || '',
+      userAgent: req.get('user-agent') || ''
     });
   } catch (error) {
-    console.error('Error creating audit log:', error);
-    // Don't throw - audit logging shouldn't break the app
+    console.error('createAuditLog failed:', error.message);
   }
-};
+}
 
-export const auditMiddleware = (action, entity) => {
-  return async (req, res, next) => {
-    // Log after the action completes
-    const originalSend = res.json;
-    res.json = function(data) {
+function auditMiddleware(action, entityType) {
+  return (req, res, next) => {
+    const originalJson = res.json.bind(res);
+    res.json = (body) => {
       if (res.statusCode < 400) {
-        const entityId = req.params.id || data?.data?._id || data?.data?.id;
-        createAuditLog(req, action, entity, entityId, req.body);
+        const entityId = req.params.id || body?.data?._id || body?.data?.id || null;
+        createAuditLog(req, action, entityType, entityId, { body: req.body });
       }
-      return originalSend.call(this, data);
+      return originalJson(body);
     };
     next();
   };
-};
+}
 
+module.exports = {
+  createAuditLog,
+  auditMiddleware
+};

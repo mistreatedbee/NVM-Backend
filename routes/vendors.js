@@ -23,9 +23,11 @@ const {
   getMyVendorProfile,
   getVendorAnalytics,
   approveVendor,
-  rejectVendor
+  rejectVendor,
+  getNearbyVendors
 } = require('../controllers/vendorController');
 const { getVendorReviewsByVendor } = require('../controllers/reviewController');
+const { getVendorPickupPoints } = require('../controllers/logisticsController');
 const { authenticate, isAdmin } = require('../middleware/auth');
 const {
   vendorValidation,
@@ -51,12 +53,14 @@ router.post('/', authenticate, upload.single('logo'), vendorValidation, validate
 router.get('/', paginationValidation, validate, getAllVendors);
 router.get('/admin/all', authenticate, isAdmin, paginationValidation, validate, getAdminVendors);
 router.get('/admin/:id', authenticate, isAdmin, validateId, validate, getAdminVendorDetails);
+router.get('/nearby', paginationValidation, validate, getNearbyVendors);
 
 // Get my vendor profile - must be authenticated
 router.get('/me/profile', authenticate, getMyVendorProfile);
 router.get('/slug/:slug', getVendorBySlug);
 router.get('/:vendorId([0-9a-fA-F]{24})/profile', authenticate, validateVendorId, validate, getVendorProfileByVendorId);
 router.get('/:vendorId([0-9a-fA-F]{24})/reviews', validateVendorId, validate, paginationValidation, validate, getVendorReviewsByVendor);
+router.get('/:vendorId([0-9a-fA-F]{24})/pickup-points', validateVendorId, validate, getVendorPickupPoints);
 router.post('/:vendorId([0-9a-fA-F]{24})/profile', authenticate, validateVendorId, vendorProfileValidation, validate, upsertVendorProfile);
 router.put('/:vendorId([0-9a-fA-F]{24})/profile', authenticate, validateVendorId, vendorProfileValidation, validate, upsertVendorProfile);
 router.put(

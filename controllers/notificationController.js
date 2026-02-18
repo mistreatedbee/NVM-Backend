@@ -49,9 +49,10 @@ exports.getNotifications = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
+      page,
+      limit,
       total,
-      currentPage: page,
-      pages: Math.ceil(total / limit),
+      totalPages: Math.ceil(total / limit) || 1,
       unreadCount,
       data: notifications
     });

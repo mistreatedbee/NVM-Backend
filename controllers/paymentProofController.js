@@ -7,6 +7,7 @@ const Vendor = require('../models/Vendor');
 const AuditLog = require('../models/AuditLog');
 const cloudinary = require('../utils/cloudinary');
 const { notifyUser, notifyAdmins } = require('../services/notificationService');
+const { applyCommissionToOrder } = require('../services/commissionService');
 
 function isObjectId(id) {
   return mongoose.Types.ObjectId.isValid(id);
@@ -72,6 +73,7 @@ exports.uploadPaymentProof = async (req, res, next) => {
 
     order.paymentStatus = 'UNDER_REVIEW';
     await order.save();
+    await applyCommissionToOrder(order);
 
     await notifyAdmins({
       type: 'SYSTEM',

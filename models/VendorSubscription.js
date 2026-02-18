@@ -1,87 +1,33 @@
 const mongoose = require('mongoose');
-
-const subscriptionPlanSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: true,
-    enum: ['free', 'basic', 'professional', 'enterprise']
-  },
-  displayName: {
-    type: String,
-    required: true
-  },
-  price: {
-    type: Number,
-    required: true,
-    default: 0
-  },
-  billingCycle: {
-    type: String,
-    enum: ['monthly', 'yearly'],
-    default: 'monthly'
-  },
-  features: {
-    maxProducts: {
-      type: Number,
-      default: 10
-    },
-    maxImages: {
-      type: Number,
-      default: 5
-    },
-    commissionRate: {
-      type: Number,
-      default: 15 // percentage
-    },
-    featuredListings: {
-      type: Number,
-      default: 0
-    },
-    analytics: {
-      type: Boolean,
-      default: false
-    },
-    prioritySupport: {
-      type: Boolean,
-      default: false
-    },
-    customBranding: {
-      type: Boolean,
-      default: false
-    },
-    bulkUpload: {
-      type: Boolean,
-      default: false
-    },
-    apiAccess: {
-      type: Boolean,
-      default: false
-    }
-  },
-  isActive: {
-    type: Boolean,
-    default: true
-  }
-}, {
-  timestamps: true
-});
+const SubscriptionPlan = require('./SubscriptionPlan');
 
 const vendorSubscriptionSchema = new mongoose.Schema({
-  vendor: {
+  vendorId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Vendor',
     required: true,
     unique: true
   },
-  plan: {
-    type: String,
-    enum: ['free', 'basic', 'professional', 'enterprise'],
-    default: 'free'
+  vendor: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Vendor'
+  },
+  planId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'SubscriptionPlan',
+    required: true
   },
   status: {
     type: String,
-    enum: ['active', 'cancelled', 'expired', 'suspended'],
-    default: 'active'
+    enum: ['ACTIVE', 'PAST_DUE', 'CANCELLED', 'active', 'cancelled', 'expired', 'suspended'],
+    default: 'ACTIVE'
+  },
+  startAt: {
+    type: Date,
+    default: Date.now
+  },
+  endAt: {
+    type: Date
   },
   startDate: {
     type: Date,
@@ -136,23 +82,32 @@ const vendorSubscriptionSchema = new mongoose.Schema({
 });
 
 // Indexes
-vendorSubscriptionSchema.index({ status: 1 });
-vendorSubscriptionSchema.index({ endDate: 1 });
+vendorSubscriptionSchema.index({ status: 1, endAt: 1 });
+vendorSubscriptionSchema.pre('validate', function syncCompatibility(next) {
+  if (!this.vendor && this.vendorId) this.vendor = this.vendorId;
+  if (!this.vendorId && this.vendor) this.vendorId = this.vendor;
+  if (!this.startDate && this.startAt) this.startDate = this.startAt;
+  if (!this.startAt && this.startDate) this.startAt = this.startDate;
+  if (!this.endDate && this.endAt) this.endDate = this.endAt;
+  if (!this.endAt && this.endDate) this.endAt = this.endDate;
+  if (this.status === 'active') this.status = 'ACTIVE';
+  if (this.status === 'cancelled') this.status = 'CANCELLED';
+  next();
+});
 
 // Check if subscription is expired
 vendorSubscriptionSchema.methods.isExpired = function() {
-  return this.endDate && this.endDate < Date.now();
+  return Boolean((this.endAt || this.endDate) && (this.endAt || this.endDate) < Date.now());
 };
 
 // Get plan features
 vendorSubscriptionSchema.methods.getPlanFeatures = async function() {
-  const SubscriptionPlan = mongoose.model('SubscriptionPlan');
-  const plan = await SubscriptionPlan.findOne({ name: this.plan, isActive: true });
-  return plan ? plan.features : null;
+  const plan = await SubscriptionPlan.findById(this.planId).select('features isActive');
+  if (!plan || !plan.isActive) return null;
+  return plan.features || {};
 };
 
-const SubscriptionPlan = mongoose.model('SubscriptionPlan', subscriptionPlanSchema);
-const VendorSubscription = mongoose.model('VendorSubscription', vendorSubscriptionSchema);
+const VendorSubscription = mongoose.models.VendorSubscription || mongoose.model('VendorSubscription', vendorSubscriptionSchema);
 
 module.exports = { SubscriptionPlan, VendorSubscription };
 
