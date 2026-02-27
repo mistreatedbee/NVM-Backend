@@ -107,10 +107,12 @@ function toSlug(value = '') {
 
 function isPublicVendor(vendor) {
   const hasLegacyStatus = typeof vendor.accountStatus === 'undefined';
+  const hasLegacyVendorStatus = typeof vendor.vendorStatus === 'undefined';
   return vendor &&
     vendor.status === 'approved' &&
     vendor.isActive === true &&
-    (vendor.accountStatus === 'active' || hasLegacyStatus);
+    (vendor.accountStatus === 'active' || hasLegacyStatus) &&
+    (vendor.vendorStatus === 'ACTIVE' || hasLegacyVendorStatus);
 }
 
 function buildVendorPublicProfile(vendor) {
@@ -1178,7 +1180,7 @@ exports.getPublicVendorProfileBySlug = async (req, res, next) => {
       $or: [{ usernameSlug: req.params.slug }, { slug: req.params.slug }]
     }).populate('user', 'name avatar');
 
-    if (!vendor || !isPublicVendor(vendor) || vendor.vendorStatus !== 'ACTIVE') {
+    if (!vendor || !isPublicVendor(vendor)) {
       return res.status(404).json({
         success: false,
         message: 'Vendor profile not found'

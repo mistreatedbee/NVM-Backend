@@ -499,7 +499,22 @@ exports.getPublicStoreBySlug = async (req, res, next) => {
     const storeSlug = slugify(req.params.storeSlug);
     const vendor = await Vendor.findOne({
       $or: [{ storeSlug }, { usernameSlug: storeSlug }, { slug: storeSlug }],
-      vendorStatus: 'ACTIVE'
+      status: 'approved',
+      isActive: true,
+      $and: [
+        {
+          $or: [
+            { accountStatus: 'active' },
+            { accountStatus: { $exists: false } }
+          ]
+        },
+        {
+          $or: [
+            { vendorStatus: 'ACTIVE' },
+            { vendorStatus: { $exists: false } }
+          ]
+        }
+      ]
     });
     if (!vendor) return res.status(404).json({ success: false, message: 'Store not found' });
 
