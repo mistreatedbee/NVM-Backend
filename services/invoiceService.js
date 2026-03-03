@@ -179,6 +179,10 @@ async function issueInvoicesForOrder({ orderId, actorId = null, force = false })
     throw error;
   }
 
+  const vendorIds = [...new Set((order.items || []).map((item) => String(item.vendorId || item.vendor)).filter(Boolean))];
+  const vendors = await Vendor.find({ _id: { $in: vendorIds } });
+  const vendorMap = new Map(vendors.map((vendor) => [String(vendor._id), vendor]));
+
   const existingInvoices = await Invoice.find({ orderId: order._id });
   const existingByKey = new Map();
   for (const inv of existingInvoices) {
@@ -192,6 +196,15 @@ async function issueInvoicesForOrder({ orderId, actorId = null, force = false })
 
   if (!existingByKey.has('CUSTOMER')) {
     const customerLineItems = (order.items || []).map(normalizeOrderLine);
+    const vendorPaymentDetails = vendorIds.map((vendorId) => {
+      const vendor = vendorMap.get(vendorId);
+      const snapshot = mapVendorSnapshot(vendor);
+      return {
+        vendorId,
+        ...snapshot
+      };
+    }).filter((entry) => entry.storeName || entry.contact?.email || entry.banking?.accountNumber);
+
     const customerInvoice = await createInvoiceDocument(
       {
         orderId: order._id,
@@ -213,7 +226,8 @@ async function issueInvoicesForOrder({ orderId, actorId = null, force = false })
         metadata: {
           orderNumber: order.orderNumber,
           paymentMethod: order.paymentMethod,
-          paymentStatus: normalizePaidStatus(order.paymentStatus)
+          paymentStatus: normalizePaidStatus(order.paymentStatus),
+          vendorPaymentDetails
         }
       },
       actorId
@@ -221,10 +235,6 @@ async function issueInvoicesForOrder({ orderId, actorId = null, force = false })
     created.push(customerInvoice);
     invoiceIds.push(customerInvoice._id);
   }
-
-  const vendorIds = [...new Set((order.items || []).map((item) => String(item.vendorId || item.vendor)).filter(Boolean))];
-  const vendors = await Vendor.find({ _id: { $in: vendorIds } });
-  const vendorMap = new Map(vendors.map((vendor) => [String(vendor._id), vendor]));
 
   const commissionRate = Math.max(0, Number(process.env.VENDOR_COMMISSION_RATE || 0));
 

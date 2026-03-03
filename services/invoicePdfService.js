@@ -19,6 +19,39 @@ function writeLine(doc, label, value, x, y) {
   doc.font('Helvetica').text(value || '-', x + 130, y);
 }
 
+function lineOrDash(parts) {
+  const value = parts.filter(Boolean).join(', ');
+  return value || '-';
+}
+
+function drawVendorSection(doc, vendor, y) {
+  const contact = vendor.contact || {};
+  const location = vendor.location || {};
+  const banking = vendor.banking || {};
+
+  y = ensureSpace(doc, y, 130);
+  doc.fontSize(10).font('Helvetica-Bold').text(vendor.storeName || 'Vendor', 50, y);
+  y += 14;
+  doc.font('Helvetica').text([contact.name, contact.email, contact.phone].filter(Boolean).join(' | ') || '-', 50, y, { width: 500 });
+  y += 14;
+  doc.text(lineOrDash([location.addressLine, location.suburb, location.city, location.state, location.country]), 50, y, { width: 500 });
+  y += 14;
+  doc.font('Helvetica-Bold').text('Payment Details', 50, y);
+  y += 14;
+  doc.font('Helvetica').text(`Bank Name: ${banking.bankName || '-'}`, 50, y);
+  y += 14;
+  doc.text(`Account Holder: ${banking.accountHolder || '-'}`, 50, y);
+  y += 14;
+  doc.text(`Account Number: ${banking.accountNumber || '-'}`, 50, y);
+  y += 14;
+  doc.text(`Branch Code: ${banking.branchCode || '-'}`, 50, y);
+  y += 14;
+  doc.text(`Account Type: ${banking.accountType || '-'}`, 50, y);
+  y += 18;
+
+  return y;
+}
+
 function drawTableHeader(doc, y) {
   doc.fontSize(10).font('Helvetica-Bold');
   doc.text('Item', 50, y, { width: 250 });
@@ -97,34 +130,19 @@ async function generateInvoicePdfBuffer(invoice) {
     y = ensureSpace(doc, y, 100);
     doc.fontSize(12).font('Helvetica-Bold').text('Vendor Details', 50, y);
     y += 18;
-    const vendor = invoice.vendorDetails;
-    const contact = vendor.contact || {};
-    const location = vendor.location || {};
-    const banking = vendor.banking || {};
-    doc.fontSize(10).font('Helvetica');
-    doc.text(vendor.storeName || '-', 50, y);
-    y += 14;
-    doc.text([contact.name, contact.email, contact.phone].filter(Boolean).join(' | ') || '-', 50, y);
-    y += 14;
-    doc.text([location.addressLine, location.suburb, location.city, location.state, location.country].filter(Boolean).join(', ') || '-', 50, y, { width: 500 });
-    y += 14;
-    doc.font('Helvetica-Bold').text('Banking Snapshot', 50, y);
-    y += 14;
-    doc.font('Helvetica').text(
-      [
-        `Bank: ${banking.bankName || '-'}`,
-        `Account Holder: ${banking.accountHolder || '-'}`,
-        `Account Number: ${banking.accountNumber || '-'}`,
-        `Branch Code: ${banking.branchCode || '-'}`,
-        `Account Type: ${banking.accountType || '-'}`,
-        `Payout Email: ${banking.payoutEmail || '-'}`,
-        `Payout Ref: ${banking.payoutReference || '-'}`
-      ].join(' | '),
-      50,
-      y,
-      { width: 500 }
-    );
-    y += 30;
+    y = drawVendorSection(doc, invoice.vendorDetails, y);
+  }
+
+  const customerVendorSnapshots = Array.isArray(invoice.metadata?.vendorPaymentDetails)
+    ? invoice.metadata.vendorPaymentDetails
+    : [];
+  if (invoice.type === 'CUSTOMER' && customerVendorSnapshots.length) {
+    y = ensureSpace(doc, y, 100);
+    doc.fontSize(12).font('Helvetica-Bold').text('Vendors & Payment Details', 50, y);
+    y += 18;
+    for (const vendor of customerVendorSnapshots) {
+      y = drawVendorSection(doc, vendor, y);
+    }
   }
 
   y = ensureSpace(doc, y, 100);
@@ -145,7 +163,7 @@ async function generateInvoicePdfBuffer(invoice) {
   const totals = invoice.totals || {};
   const rows = [
     ['Subtotal', totals.subtotal],
-    ['Delivery', totals.deliveryFee],
+    ['Delivery Fee', totals.deliveryFee],
     ['Discount', totals.discount],
     ['Tax', totals.tax],
     ['Total', totals.total]
