@@ -6,6 +6,7 @@ const { securityHeaders, apiLimiter, requireTrustedOrigin, sensitiveWriteLimiter
 dotenv.config();
 
 const app = express();
+app.set('trust proxy', 1);
 
 const configuredCorsOrigins = String(process.env.CORS_ORIGINS || '')
   .split(',')
@@ -13,6 +14,8 @@ const configuredCorsOrigins = String(process.env.CORS_ORIGINS || '')
   .filter(Boolean);
 
 const allowedOrigins = [
+  'https://www.nvmmarketplace.co.za',
+  'https://nvmmarketplace.co.za',
   'http://localhost:5173',
   'http://localhost:3000',
   'https://nvm-frontend.vercel.app',
@@ -20,28 +23,26 @@ const allowedOrigins = [
   ...configuredCorsOrigins
 ].filter(Boolean);
 
-app.use(cors({
+const corsOptions = {
   origin: function(origin, callback) {
+    // Allow server-to-server and non-browser requests.
     if (!origin) return callback(null, true);
 
-    if (origin.includes('vercel.app')) {
+    const isVercelPreview = origin.endsWith('.vercel.app');
+    if (allowedOrigins.includes(origin) || isVercelPreview) {
       return callback(null, true);
     }
 
-    if (origin.includes('localhost')) {
-      return callback(null, true);
-    }
-
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
+    return callback(new Error(`CORS not allowed for origin: ${origin}`), false);
   },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-session-id']
-}));
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  credentials: false,
+  optionsSuccessStatus: 204
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -193,6 +194,17 @@ app.get('/api/health', (req, res) => {
     status: 'OK',
     message: 'VM Marketplace API is running',
     timestamp: new Date().toISOString()
+  });
+});
+
+app.use((error, req, res, next) => {
+  if (!error || !String(error.message || '').startsWith('CORS not allowed for origin:')) {
+    return next(error);
+  }
+
+  return res.status(403).json({
+    success: false,
+    message: error.message
   });
 });
 
