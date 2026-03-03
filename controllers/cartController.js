@@ -97,6 +97,23 @@ function collapseCartItems(items = []) {
   return Array.from(merged.values());
 }
 
+async function backfillMissingVendorIds(cart) {
+  const missingProductIds = cart.items
+    .filter((item) => !item.vendorId && item.productId)
+    .map((item) => item.productId);
+  if (!missingProductIds.length) return;
+
+  const products = await Product.find({ _id: { $in: missingProductIds } })
+    .select('_id vendor')
+    .lean();
+  const vendorByProduct = new Map(products.map((p) => [String(p._id), p.vendor]));
+  for (const item of cart.items) {
+    if (item.vendorId || !item.productId) continue;
+    const vendorId = vendorByProduct.get(String(item.productId));
+    if (vendorId) item.vendorId = vendorId;
+  }
+}
+
 async function ensurePurchasableProduct(productId) {
   ensureProductId(productId);
 
@@ -207,6 +224,9 @@ exports.getCart = async (req, res, next) => {
     const payload = await buildCartResponse(owner);
     return res.status(200).json(payload);
   } catch (error) {
+    if (error?.name === 'ValidationError') {
+      return res.status(400).json({ success: false, message: error.message });
+    }
     if (error.statusCode) {
       return res.status(error.statusCode).json({ success: false, message: error.message });
     }
@@ -254,6 +274,7 @@ exports.addCartItem = async (req, res, next) => {
       cart.items[idx].priceSnapshot = product.price;
       cart.items[idx].titleSnapshot = product.title || product.name;
       cart.items[idx].imageSnapshot = product.images?.[0]?.url || '';
+      cart.items[idx].vendorId = product.vendor;
       cart.items[idx].addedAt = new Date();
     } else {
       if (product.trackInventory && safeQty > product.stock) {
@@ -271,6 +292,7 @@ exports.addCartItem = async (req, res, next) => {
     }
 
     cart.items = collapseCartItems(cart.items);
+    await backfillMissingVendorIds(cart);
     await cart.save();
     const payload = await buildCartResponse(owner);
     if (idempotencyKey) {
@@ -278,6 +300,9 @@ exports.addCartItem = async (req, res, next) => {
     }
     return res.status(200).json(payload);
   } catch (error) {
+    if (error?.name === 'ValidationError') {
+      return res.status(400).json({ success: false, message: error.message });
+    }
     if (error.statusCode) {
       return res.status(error.statusCode).json({ success: false, message: error.message });
     }
@@ -310,12 +335,17 @@ exports.updateCartItem = async (req, res, next) => {
     cart.items[idx].priceSnapshot = product.price;
     cart.items[idx].titleSnapshot = product.title || product.name;
     cart.items[idx].imageSnapshot = product.images?.[0]?.url || '';
+    cart.items[idx].vendorId = product.vendor;
     cart.items = collapseCartItems(cart.items);
+    await backfillMissingVendorIds(cart);
     await cart.save();
 
     const payload = await buildCartResponse(owner);
     return res.status(200).json(payload);
   } catch (error) {
+    if (error?.name === 'ValidationError') {
+      return res.status(400).json({ success: false, message: error.message });
+    }
     if (error.statusCode) {
       return res.status(error.statusCode).json({ success: false, message: error.message });
     }
@@ -333,11 +363,15 @@ exports.removeCartItem = async (req, res, next) => {
 
     const cart = await getOrCreateCartByOwner(owner);
     cart.items = cart.items.filter((item) => String(item.productId) !== String(productId));
+    await backfillMissingVendorIds(cart);
     await cart.save();
 
     const payload = await buildCartResponse(owner);
     return res.status(200).json(payload);
   } catch (error) {
+    if (error?.name === 'ValidationError') {
+      return res.status(400).json({ success: false, message: error.message });
+    }
     if (error.statusCode) {
       return res.status(error.statusCode).json({ success: false, message: error.message });
     }
@@ -352,6 +386,7 @@ exports.clearCart = async (req, res, next) => {
     const cart = await getOrCreateCartByOwner(owner);
     cart.items = [];
     cart.couponCode = '';
+    await backfillMissingVendorIds(cart);
     await cart.save();
 
     const payload = await buildCartResponse(owner);
@@ -415,10 +450,14 @@ exports.mergeCart = async (req, res, next) => {
     }
 
     cart.items = collapseCartItems(cart.items);
+    await backfillMissingVendorIds(cart);
     await cart.save();
     const payload = await buildCartResponse({ userId: req.user.id, sessionId: null });
     return res.status(200).json(payload);
   } catch (error) {
+    if (error?.name === 'ValidationError') {
+      return res.status(400).json({ success: false, message: error.message });
+    }
     return next(error);
   }
 };
