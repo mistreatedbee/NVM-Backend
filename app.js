@@ -7,11 +7,17 @@ dotenv.config();
 
 const app = express();
 
+const configuredCorsOrigins = String(process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:3000',
   'https://nvm-frontend.vercel.app',
-  process.env.FRONTEND_URL
+  process.env.FRONTEND_URL,
+  ...configuredCorsOrigins
 ].filter(Boolean);
 
 app.use(cors({

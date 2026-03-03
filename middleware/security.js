@@ -1,11 +1,17 @@
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 
+const configuredCorsOrigins = String(process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 const trustedOrigins = new Set(
   [
     'http://localhost:5173',
     'http://localhost:3000',
-    process.env.FRONTEND_URL
+    process.env.FRONTEND_URL,
+    ...configuredCorsOrigins
   ].filter(Boolean)
 );
 

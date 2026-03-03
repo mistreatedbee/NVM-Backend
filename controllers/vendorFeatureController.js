@@ -146,7 +146,13 @@ async function requireVendor(req, res) {
 }
 
 function assertActiveVendor(vendor) {
-  if (String(vendor?.vendorStatus || '').toUpperCase() !== 'ACTIVE') {
+  const vendorStatus = String(vendor?.vendorStatus || '').trim().toUpperCase();
+  const legacyStatus = String(vendor?.status || '').trim().toLowerCase();
+  const legacyAccountStatus = String(vendor?.accountStatus || '').trim().toLowerCase();
+  const activeByLegacyStatus = legacyStatus === 'approved' && legacyAccountStatus === 'active';
+  const isActive = vendorStatus === 'ACTIVE' || (!vendorStatus && activeByLegacyStatus) || (vendorStatus === 'PENDING' && activeByLegacyStatus);
+
+  if (!isActive) {
     const error = new Error('Vendor account must be ACTIVE for this action');
     error.statusCode = 403;
     throw error;

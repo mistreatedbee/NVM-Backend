@@ -1,17 +1,41 @@
 const Vendor = require('../models/Vendor');
 
-function isVendorActive(vendor) {
-  if (!vendor) return false;
+const DEBUG_AUTH_ENABLED = process.env.NODE_ENV !== 'production' || String(process.env.DEBUG_AUTH || '').toLowerCase() === 'true';
 
-  if (vendor.vendorStatus) {
-    return vendor.vendorStatus === 'ACTIVE';
-  }
-
-  return vendor.status === 'approved' && vendor.accountStatus === 'active';
+function authDebug(event, payload = {}) {
+  if (!DEBUG_AUTH_ENABLED) return;
+  console.log(`[auth:${event}]`, payload);
 }
 
 function normalizeRole(role) {
   return String(role || '').toUpperCase();
+}
+
+function normalizeVendorStatus(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function normalizeLegacyStatus(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function getVendorAccessState(vendor) {
+  const vendorStatus = normalizeVendorStatus(vendor?.vendorStatus);
+  const legacyStatus = normalizeLegacyStatus(vendor?.status);
+  const legacyAccountStatus = normalizeLegacyStatus(vendor?.accountStatus);
+
+  const activeByVendorStatus = vendorStatus === 'ACTIVE';
+  const activeByLegacyStatus = legacyStatus === 'approved' && legacyAccountStatus === 'active';
+
+  // Handle stale/migrated records where vendorStatus remained PENDING but legacy flags are active.
+  const isActive = activeByVendorStatus || (!vendorStatus && activeByLegacyStatus) || (vendorStatus === 'PENDING' && activeByLegacyStatus);
+
+  return {
+    isActive,
+    vendorStatus,
+    legacyStatus,
+    legacyAccountStatus
+  };
 }
 
 function toSlug(value) {
@@ -65,9 +89,16 @@ exports.requireActiveVendorAccount = async (req, res, next) => {
     }
 
     if (role !== 'VENDOR') {
+      authDebug('require-active-vendor.forbidden-role', {
+        path: req.originalUrl,
+        method: req.method,
+        userId: req.user?.id || null,
+        role
+      });
       return res.status(403).json({
         success: false,
-        message: 'Vendor privileges required'
+        message: 'Forbidden',
+        detail: 'Role vendor required'
       });
     }
 
@@ -86,18 +117,41 @@ exports.requireActiveVendorAccount = async (req, res, next) => {
       });
     }
 
-    if (!isVendorActive(vendor)) {
+    const state = getVendorAccessState(vendor);
+    if (!state.isActive) {
       const reason = vendor.suspensionReason || vendor.rejectionReason || 'Vendor account is not active';
+      authDebug('require-active-vendor.inactive', {
+        path: req.originalUrl,
+        method: req.method,
+        userId: req.user.id,
+        role,
+        vendorStatus: state.vendorStatus || null,
+        status: state.legacyStatus || null,
+        accountStatus: state.legacyAccountStatus || null,
+        reason
+      });
+
       return res.status(403).json({
         success: false,
-        message: `Vendor account is restricted: ${reason}`,
+        message: 'Forbidden',
+        detail: `Vendor account is restricted: ${reason}`,
         data: {
-          vendorStatus: vendor.vendorStatus || null,
-          status: vendor.status,
-          accountStatus: vendor.accountStatus
+          vendorStatus: state.vendorStatus || null,
+          status: state.legacyStatus || null,
+          accountStatus: state.legacyAccountStatus || null
         }
       });
     }
+
+    authDebug('require-active-vendor.allowed', {
+      path: req.originalUrl,
+      method: req.method,
+      userId: req.user.id,
+      role,
+      vendorStatus: state.vendorStatus || null,
+      status: state.legacyStatus || null,
+      accountStatus: state.legacyAccountStatus || null
+    });
 
     req.vendor = vendor;
     return next();
