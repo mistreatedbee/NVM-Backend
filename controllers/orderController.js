@@ -20,6 +20,17 @@ const { recordPurchaseEventsForOrder } = require('../services/productAnalyticsSe
 const { logActivity, resolveIp } = require('../services/loggingService');
 const { evaluateFraudRules } = require('../services/trustSafetyService');
 const { calculateDeliveryFee } = require('../services/logisticsService');
+const ORDER_IDEMPOTENCY_TTL_MS = 10 * 60 * 1000;
+const orderIdempotencyCache = new Map();
+
+function debugOrderLog(...args) {
+  if (String(process.env.ORDER_DEBUG || '').toLowerCase() !== 'true') return;
+  console.log('[order]', ...args);
+}
+
+function getOrderIdempotencyKey(req) {
+  return String(req.headers['idempotency-key'] || '').trim();
+}
 
 function calculatePromoDiscount(subtotal, promo) {
   if (!promo) return 0;
@@ -43,6 +54,25 @@ function normalizeVendorCouponInputs(payload = {}) {
 // @access  Private (Customer)
 exports.createOrder = async (req, res, next) => {
   try {
+    const idempotencyKey = getOrderIdempotencyKey(req);
+    const idemCacheKey = idempotencyKey ? `order:create:u:${req.user.id}:${idempotencyKey}` : '';
+    if (idempotencyKey) {
+      const cached = orderIdempotencyCache.get(idemCacheKey);
+      if (cached && Date.now() - cached.timestamp <= ORDER_IDEMPOTENCY_TTL_MS) {
+        const existingOrder = await Order.findById(cached.orderId);
+        if (existingOrder) {
+          const invoices = await Invoice.find({ orderId: existingOrder._id }).select('_id invoiceNumber type issuedAt').lean();
+          return res.status(200).json({
+            success: true,
+            idempotentReplay: true,
+            data: existingOrder,
+            invoices
+          });
+        }
+        orderIdempotencyCache.delete(idemCacheKey);
+      }
+    }
+
     const {
       items,
       shippingAddress,
@@ -53,6 +83,11 @@ exports.createOrder = async (req, res, next) => {
       giftCardCode,
       deliveryMethod
     } = req.body;
+    debugOrderLog('create request', {
+      userId: req.user.id,
+      itemsCount: Array.isArray(items) ? items.length : 0,
+      idempotencyKey: idempotencyKey || null
+    });
 
     const requestedPaymentMethod = String(paymentMethod || 'INVOICE').toUpperCase();
     if (!['INVOICE', 'EFT'].includes(requestedPaymentMethod)) {
@@ -434,6 +469,12 @@ exports.createOrder = async (req, res, next) => {
     }
 
     const invoices = await Invoice.find({ orderId: order._id }).select('_id invoiceNumber type issuedAt').lean();
+    if (idempotencyKey) {
+      orderIdempotencyCache.set(idemCacheKey, {
+        timestamp: Date.now(),
+        orderId: order._id
+      });
+    }
     res.status(201).json({
       success: true,
       data: order,

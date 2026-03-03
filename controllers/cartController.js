@@ -3,6 +3,13 @@ const Cart = require('../models/Cart');
 const Product = require('../models/Product');
 
 const MAX_QTY = 99;
+const IDEMPOTENCY_TTL_MS = 2 * 60 * 1000;
+const cartIdempotencyCache = new Map();
+
+function debugCartLog(...args) {
+  if (String(process.env.CART_DEBUG || '').toLowerCase() !== 'true') return;
+  console.log('[cart]', ...args);
+}
 
 function ensureProductId(productId) {
   if (!mongoose.Types.ObjectId.isValid(productId)) {
@@ -35,6 +42,59 @@ function resolveCartOwner(req) {
   }
 
   return { userId: null, sessionId };
+}
+
+function ownerCacheKey(owner) {
+  return owner.userId ? `u:${owner.userId}` : `s:${owner.sessionId}`;
+}
+
+function getIdempotencyKey(req) {
+  return String(req.headers['idempotency-key'] || '').trim();
+}
+
+function getCachedIdempotentResponse(scopeKey, idempotencyKey) {
+  const key = `${scopeKey}:${idempotencyKey}`;
+  const entry = cartIdempotencyCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > IDEMPOTENCY_TTL_MS) {
+    cartIdempotencyCache.delete(key);
+    return null;
+  }
+  return entry.payload;
+}
+
+function setCachedIdempotentResponse(scopeKey, idempotencyKey, payload) {
+  const key = `${scopeKey}:${idempotencyKey}`;
+  cartIdempotencyCache.set(key, {
+    timestamp: Date.now(),
+    payload
+  });
+}
+
+function collapseCartItems(items = []) {
+  const merged = new Map();
+  for (const item of items) {
+    const productKey = String(item.productId);
+    if (!merged.has(productKey)) {
+      merged.set(productKey, {
+        productId: item.productId,
+        vendorId: item.vendorId,
+        qty: Math.max(1, Math.min(MAX_QTY, Number(item.qty || 1))),
+        priceSnapshot: item.priceSnapshot,
+        titleSnapshot: item.titleSnapshot,
+        imageSnapshot: item.imageSnapshot || '',
+        addedAt: item.addedAt || new Date()
+      });
+      continue;
+    }
+    const existing = merged.get(productKey);
+    existing.qty = Math.max(1, Math.min(MAX_QTY, Number(existing.qty || 1) + Number(item.qty || 1)));
+    existing.addedAt = item.addedAt || existing.addedAt;
+    if (item.priceSnapshot !== undefined) existing.priceSnapshot = item.priceSnapshot;
+    if (item.titleSnapshot) existing.titleSnapshot = item.titleSnapshot;
+    if (item.imageSnapshot !== undefined) existing.imageSnapshot = item.imageSnapshot;
+  }
+  return Array.from(merged.values());
 }
 
 async function ensurePurchasableProduct(productId) {
@@ -77,6 +137,7 @@ async function getOrCreateCartByOwner({ userId = null, sessionId = null }) {
       items: []
     });
   }
+  cart.items = collapseCartItems(cart.items);
   return cart;
 }
 
@@ -158,6 +219,21 @@ exports.addCartItem = async (req, res, next) => {
     const owner = resolveCartOwner(req);
     const { productId, qty } = req.body || {};
     if (!productId) return res.status(400).json({ success: false, message: 'productId is required' });
+    debugCartLog('add request', {
+      owner: ownerCacheKey(owner),
+      productId: String(productId),
+      qty: qty || 1
+    });
+
+    const idempotencyKey = getIdempotencyKey(req);
+    const idemScope = `cart:add:${ownerCacheKey(owner)}:${String(productId)}`;
+    if (idempotencyKey) {
+      const cached = getCachedIdempotentResponse(idemScope, idempotencyKey);
+      if (cached) {
+        debugCartLog('add idempotent replay', { owner: ownerCacheKey(owner), productId: String(productId), idempotencyKey });
+        return res.status(200).json(cached);
+      }
+    }
 
     const safeQty = normalizeQty(qty || 1);
     const product = await ensurePurchasableProduct(productId);
@@ -194,8 +270,12 @@ exports.addCartItem = async (req, res, next) => {
       });
     }
 
+    cart.items = collapseCartItems(cart.items);
     await cart.save();
     const payload = await buildCartResponse(owner);
+    if (idempotencyKey) {
+      setCachedIdempotentResponse(idemScope, idempotencyKey, payload);
+    }
     return res.status(200).json(payload);
   } catch (error) {
     if (error.statusCode) {
@@ -210,6 +290,7 @@ exports.updateCartItem = async (req, res, next) => {
     const owner = resolveCartOwner(req);
     const { productId, qty } = req.body || {};
     if (!productId) return res.status(400).json({ success: false, message: 'productId is required' });
+    debugCartLog('update request', { owner: ownerCacheKey(owner), productId: String(productId), qty });
 
     const safeQty = normalizeQty(qty);
     const product = await ensurePurchasableProduct(productId);
@@ -229,6 +310,7 @@ exports.updateCartItem = async (req, res, next) => {
     cart.items[idx].priceSnapshot = product.price;
     cart.items[idx].titleSnapshot = product.title || product.name;
     cart.items[idx].imageSnapshot = product.images?.[0]?.url || '';
+    cart.items = collapseCartItems(cart.items);
     await cart.save();
 
     const payload = await buildCartResponse(owner);
@@ -247,6 +329,7 @@ exports.removeCartItem = async (req, res, next) => {
     const { productId } = req.body || {};
     if (!productId) return res.status(400).json({ success: false, message: 'productId is required' });
     ensureProductId(productId);
+    debugCartLog('remove request', { owner: ownerCacheKey(owner), productId: String(productId) });
 
     const cart = await getOrCreateCartByOwner(owner);
     cart.items = cart.items.filter((item) => String(item.productId) !== String(productId));
@@ -265,6 +348,7 @@ exports.removeCartItem = async (req, res, next) => {
 exports.clearCart = async (req, res, next) => {
   try {
     const owner = resolveCartOwner(req);
+    debugCartLog('clear request', { owner: ownerCacheKey(owner) });
     const cart = await getOrCreateCartByOwner(owner);
     cart.items = [];
     cart.couponCode = '';
@@ -287,6 +371,7 @@ exports.mergeCart = async (req, res, next) => {
     }
 
     const guestItems = Array.isArray(req.body?.items) ? req.body.items : [];
+    debugCartLog('merge request', { owner: `u:${req.user.id}`, guestItemsCount: guestItems.length });
     if (!guestItems.length) {
       const payload = await buildCartResponse({ userId: req.user.id, sessionId: null });
       return res.status(200).json(payload);
@@ -329,6 +414,7 @@ exports.mergeCart = async (req, res, next) => {
       }
     }
 
+    cart.items = collapseCartItems(cart.items);
     await cart.save();
     const payload = await buildCartResponse({ userId: req.user.id, sessionId: null });
     return res.status(200).json(payload);
