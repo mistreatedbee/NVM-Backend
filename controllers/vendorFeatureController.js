@@ -27,6 +27,8 @@ const PRODUCT_STATUS = {
   PUBLISHED: 'PUBLISHED',
   REJECTED: 'REJECTED'
 };
+const VENDOR_MAX_PRODUCTS = 5;
+const MAX_PRODUCT_STOCK = 1e9;
 
 let jobsStarted = false;
 
@@ -67,6 +69,16 @@ function safeNumber(value, fallback = 0) {
   const n = Number(value);
   if (Number.isNaN(n)) return fallback;
   return n;
+}
+
+function assertStockWithinBounds(stock) {
+  if (stock === undefined || stock === null || stock === '') return;
+  const numeric = Number(stock);
+  if (!Number.isFinite(numeric) || numeric < 0 || numeric > MAX_PRODUCT_STOCK) {
+    const error = new Error(`stock must be between 0 and ${MAX_PRODUCT_STOCK}`);
+    error.statusCode = 400;
+    throw error;
+  }
 }
 
 function isValidUrl(value) {
@@ -218,14 +230,17 @@ async function ensureVendorOwnsProduct(vendor, productId) {
 
 function normalizeVariants(variants) {
   if (!Array.isArray(variants)) return [];
-  return variants.map((variant) => ({
-    sku: sanitizeText(variant.sku, 80),
-    options: variant.options || {},
-    priceOverride: variant.priceOverride === undefined ? undefined : safeNumber(variant.priceOverride, 0),
-    stock: safeNumber(variant.stock, 0),
-    name: sanitizeText(variant.name, 140),
-    attributes: Array.isArray(variant.attributes) ? variant.attributes : undefined
-  }));
+  return variants.map((variant) => {
+    assertStockWithinBounds(variant.stock);
+    return {
+      sku: sanitizeText(variant.sku, 80),
+      options: variant.options || {},
+      priceOverride: variant.priceOverride === undefined ? undefined : safeNumber(variant.priceOverride, 0),
+      stock: safeNumber(variant.stock, 0),
+      name: sanitizeText(variant.name, 140),
+      attributes: Array.isArray(variant.attributes) ? variant.attributes : undefined
+    };
+  });
 }
 
 async function assertUniqueSkusForVendor(vendorId, productData, excludeProductId = null) {
@@ -574,6 +589,15 @@ exports.createVendorProduct = async (req, res, next) => {
     const vendor = await requireVendor(req, res);
     if (!vendor) return;
     const payload = req.body || {};
+    const productCount = await Product.countDocuments({ vendorId: vendor.user, isDeleted: { $ne: true } });
+    if (productCount >= VENDOR_MAX_PRODUCTS) {
+      return res.status(403).json({
+        success: false,
+        message: 'Product limit reached. Vendors can create up to 5 products.',
+        remainingSlots: 0
+      });
+    }
+    assertStockWithinBounds(payload.stock);
     await assertUniqueSkusForVendor(vendor._id, payload);
 
     const product = await Product.create({
@@ -586,7 +610,11 @@ exports.createVendorProduct = async (req, res, next) => {
       specifications: Array.isArray(payload.specifications) ? payload.specifications : []
     });
 
-    return res.status(201).json({ success: true, data: product });
+    return res.status(201).json({
+      success: true,
+      data: product,
+      remainingSlots: Math.max(0, VENDOR_MAX_PRODUCTS - (productCount + 1))
+    });
   } catch (error) {
     return next(error);
   }
@@ -602,6 +630,7 @@ exports.updateVendorProduct = async (req, res, next) => {
     await assertUniqueSkusForVendor(vendor._id, payload, product._id);
     const forbidden = ['status', 'vendor', 'vendorId', 'publishedBy', 'rejectedBy'];
     for (const key of forbidden) delete payload[key];
+    assertStockWithinBounds(payload.stock);
     if (payload.variants) payload.variants = normalizeVariants(payload.variants);
 
     Object.assign(product, payload);
@@ -715,11 +744,16 @@ exports.bulkUploadVendorProducts = async (req, res, next) => {
       return res.status(400).json({ success: false, message: `Missing required columns: ${missing.join(', ')}` });
     }
 
+    const startingCount = await Product.countDocuments({ vendorId: vendor.user, isDeleted: { $ne: true } });
     let createdCount = 0;
     const failedRows = [];
     for (let i = 0; i < parsed.data.length; i += 1) {
       const row = parsed.data[i];
       try {
+        const currentCount = startingCount + createdCount;
+        if (currentCount >= VENDOR_MAX_PRODUCTS) {
+          throw new Error('Product limit reached. Vendors can create up to 5 products.');
+        }
         const payload = {
           name: sanitizeText(row.title, 200),
           title: sanitizeText(row.title, 200),
@@ -739,6 +773,7 @@ exports.bulkUploadVendorProducts = async (req, res, next) => {
         if (!payload.name || !payload.description || !payload.category || payload.price < 0 || payload.stock < 0 || !payload.sku) {
           throw new Error('Missing or invalid required values');
         }
+        assertStockWithinBounds(payload.stock);
 
         await assertUniqueSkusForVendor(vendor._id, payload);
         await Product.create(payload);

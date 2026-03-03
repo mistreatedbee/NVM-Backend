@@ -15,6 +15,8 @@ const PRODUCT_STATUS = {
   PUBLISHED: 'PUBLISHED',
   REJECTED: 'REJECTED'
 };
+const VENDOR_MAX_PRODUCTS = 5;
+const MAX_PRODUCT_STOCK = 1e9;
 
 const VENDOR_CAN_UNPUBLISH = String(process.env.VENDOR_CAN_UNPUBLISH || 'false').toLowerCase() === 'true';
 const VENDOR_CAN_REPUBLISH = String(process.env.VENDOR_CAN_REPUBLISH || 'false').toLowerCase() === 'true';
@@ -62,13 +64,87 @@ async function resolveCategoryFilter(categoryParam) {
 async function getPublicVisibilityFilters() {
   const [categories, vendors] = await Promise.all([
     Category.find({ isActive: true }).select('_id'),
-    Vendor.find({ vendorStatus: 'ACTIVE', isActive: true }).select('_id')
+    Vendor.find({
+      isActive: true,
+      $and: [
+        {
+          $or: [
+            { vendorStatus: 'ACTIVE' },
+            {
+              vendorStatus: { $exists: false },
+              status: 'approved'
+            }
+          ]
+        },
+        {
+          $or: [
+            { accountStatus: 'active' },
+            { accountStatus: { $exists: false } }
+          ]
+        }
+      ]
+    }).select('_id')
   ]);
 
   return {
     category: { $in: categories.map((item) => item._id) },
     vendor: { $in: vendors.map((item) => item._id) }
   };
+}
+
+function isObjectId(value) {
+  return /^[a-f\d]{24}$/i.test(String(value || ''));
+}
+
+function parsePublicVendorSort(sort) {
+  const value = String(sort || 'newest').toLowerCase();
+  if (value === 'price' || value === 'price_asc' || value === 'price-asc') {
+    return { price: 1, createdAt: -1 };
+  }
+  if (value === 'price_desc' || value === 'price-desc') {
+    return { price: -1, createdAt: -1 };
+  }
+  if (value === 'popular' || value === 'best_selling' || value === 'best-selling') {
+    return { totalSales: -1, createdAt: -1 };
+  }
+  return { createdAt: -1 };
+}
+
+function isVendorPubliclyActive(vendor) {
+  if (!vendor || vendor.isActive === false) return false;
+  const vendorStatus = String(vendor.vendorStatus || '').toUpperCase();
+  const legacyStatus = String(vendor.status || '').toLowerCase();
+  const accountStatus = String(vendor.accountStatus || '').toLowerCase();
+  if (vendorStatus === 'ACTIVE') {
+    return accountStatus ? accountStatus === 'active' : true;
+  }
+  return legacyStatus === 'approved' && (!accountStatus || accountStatus === 'active');
+}
+
+async function resolveVendorForPublicProducts(vendorParam) {
+  if (!isObjectId(vendorParam)) return null;
+  const vendor = await Vendor.findOne({
+    $or: [{ _id: vendorParam }, { user: vendorParam }]
+  }).select('_id user vendorStatus status accountStatus isActive');
+  if (!isVendorPubliclyActive(vendor)) return null;
+  return vendor;
+}
+
+function validateStockUpperBound(stock) {
+  if (stock === undefined || stock === null || stock === '') return;
+  const numeric = Number(stock);
+  if (!Number.isFinite(numeric) || numeric < 0 || numeric > MAX_PRODUCT_STOCK) {
+    const error = new Error(`stock must be between 0 and ${MAX_PRODUCT_STOCK}`);
+    error.statusCode = 400;
+    throw error;
+  }
+}
+
+function validateProductStockPayload(payload) {
+  validateStockUpperBound(payload?.stock);
+  if (Array.isArray(payload?.variants)) {
+    payload.variants.forEach((variant) => validateStockUpperBound(variant?.stock));
+  }
 }
 
 function getTrendingCache(key) {
@@ -163,13 +239,18 @@ exports.createProduct = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Vendor must be approved and active to create products' });
     }
 
-    const activeProductCount = await Product.countDocuments({ vendor: vendor._id, isActive: true });
-    if (activeProductCount >= 2) {
-      return res.status(403).json({ success: false, message: 'Product limit reached: you can only add 2 products at the moment' });
+    const productCount = await Product.countDocuments({ vendorId: req.user.id, isDeleted: { $ne: true } });
+    if (productCount >= VENDOR_MAX_PRODUCTS) {
+      return res.status(403).json({
+        success: false,
+        message: 'Product limit reached. Vendors can create up to 5 products.',
+        remainingSlots: 0
+      });
     }
 
     const payload = { ...req.body };
     FORBIDDEN_VENDOR_FIELDS.forEach((field) => delete payload[field]);
+    validateProductStockPayload(payload);
 
     const product = await Product.create({
       ...payload,
@@ -206,7 +287,11 @@ exports.createProduct = async (req, res, next) => {
     await vendor.save();
 
     const populated = await populateProduct(product);
-    res.status(201).json({ success: true, data: populated });
+    res.status(201).json({
+      success: true,
+      data: populated,
+      remainingSlots: Math.max(0, VENDOR_MAX_PRODUCTS - (productCount + 1))
+    });
   } catch (error) {
     next(error);
   }
@@ -455,6 +540,7 @@ exports.updateProduct = async (req, res, next) => {
     if (!isOwner && req.user.role !== 'admin') {
       return res.status(403).json({ success: false, message: 'Not authorized to update this product' });
     }
+    validateProductStockPayload(req.body || {});
 
     if (req.user.role !== 'admin') {
       if (product.status === PRODUCT_STATUS.PENDING) {
@@ -1005,17 +1091,47 @@ exports.getVendorProducts = async (req, res, next) => {
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 12;
     const skip = (page - 1) * limit;
-    const query = { vendor: req.params.vendorId, ...(await getPublicVisibilityFilters()), ...PUBLIC_PRODUCT_QUERY };
+    const vendor = await resolveVendorForPublicProducts(req.params.vendorId);
+    if (!vendor) {
+      return res.status(200).json({
+        success: true,
+        data: [],
+        page,
+        limit,
+        total: 0,
+        totalPages: 0,
+        count: 0,
+        pages: 0,
+        currentPage: page
+      });
+    }
+    const query = { vendor: vendor._id, ...(await getPublicVisibilityFilters()), ...PUBLIC_PRODUCT_QUERY };
+    const sort = parsePublicVendorSort(req.query.sort);
 
     const [products, total] = await Promise.all([
-      Product.find(query).select(PUBLIC_PRODUCT_EXCLUDE_FIELDS).populate('category', 'name slug').sort('-createdAt').skip(skip).limit(limit),
+      Product.find(query).select(PUBLIC_PRODUCT_EXCLUDE_FIELDS).populate('category', 'name slug').sort(sort).skip(skip).limit(limit),
       Product.countDocuments(query)
     ]);
 
-    res.status(200).json({ success: true, count: products.length, total, pages: Math.ceil(total / limit), currentPage: page, data: products });
+    const totalPages = Math.ceil(total / limit);
+    res.status(200).json({
+      success: true,
+      data: products,
+      page,
+      limit,
+      total,
+      totalPages,
+      count: products.length,
+      pages: totalPages,
+      currentPage: page
+    });
   } catch (error) {
     next(error);
   }
+};
+
+exports.getPublicVendorProducts = async (req, res, next) => {
+  return exports.getVendorProducts(req, res, next);
 };
 
 exports.getFeaturedProducts = async (req, res, next) => {

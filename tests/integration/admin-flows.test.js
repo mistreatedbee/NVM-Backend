@@ -259,3 +259,102 @@ test('product moderation/report endpoints: report, admin queue, moderation, audi
   assert.equal(Array.isArray(historyRes.body.data), true);
   assert.equal(historyRes.body.data.length >= 2, true);
 });
+
+test('public vendor products endpoint returns published products for active vendor', async () => {
+  const { vendor, vendorUser } = await seedUsersAndVendor();
+  const category = await Category.create({
+    name: 'Books',
+    description: 'Books category'
+  });
+
+  await Product.create({
+    vendor: vendor._id,
+    vendorId: vendorUser._id,
+    name: 'Book A',
+    description: 'Published book',
+    productType: 'physical',
+    category: category._id,
+    price: 99,
+    stock: 100,
+    images: [{ url: 'https://example.com/product/book-a.jpg' }],
+    status: 'PUBLISHED',
+    isActive: true
+  });
+
+  await Product.create({
+    vendor: vendor._id,
+    vendorId: vendorUser._id,
+    name: 'Book Draft',
+    description: 'Draft book',
+    productType: 'physical',
+    category: category._id,
+    price: 59,
+    stock: 50,
+    images: [{ url: 'https://example.com/product/book-draft.jpg' }],
+    status: 'DRAFT',
+    isActive: true
+  });
+
+  const byVendorIdRes = await request(app)
+    .get(`/api/public/vendors/${vendor._id}/products?limit=10&page=1&sort=newest`)
+    .expect(200);
+
+  assert.equal(byVendorIdRes.body.success, true);
+  assert.equal(byVendorIdRes.body.total, 1);
+  assert.equal(byVendorIdRes.body.page, 1);
+  assert.equal(byVendorIdRes.body.limit, 10);
+  assert.equal(byVendorIdRes.body.totalPages, 1);
+  assert.equal(byVendorIdRes.body.data[0].name, 'Book A');
+
+  const byUserIdRes = await request(app)
+    .get(`/api/public/vendors/${vendorUser._id}/products?limit=10&page=1&sort=newest`)
+    .expect(200);
+  assert.equal(byUserIdRes.body.success, true);
+  assert.equal(byUserIdRes.body.total, 1);
+});
+
+test('vendor cannot create more than 5 unique product documents', async () => {
+  const { vendorUser, vendor } = await seedUsersAndVendor();
+  const vendorAuth = authHeaderFor(vendorUser._id);
+  const category = await Category.create({
+    name: 'Home',
+    description: 'Home category'
+  });
+
+  for (let i = 1; i <= 5; i += 1) {
+    const res = await request(app)
+      .post('/api/vendor/products')
+      .set('Authorization', vendorAuth)
+      .send({
+        name: `Product ${i}`,
+        description: `Description ${i}`,
+        productType: 'physical',
+        category: category._id.toString(),
+        price: 10 + i,
+        stock: 100,
+        images: [{ url: `https://example.com/product-${i}.jpg` }]
+      })
+      .expect(201);
+    assert.equal(res.body.success, true);
+  }
+
+  const blocked = await request(app)
+    .post('/api/vendor/products')
+    .set('Authorization', vendorAuth)
+    .send({
+      name: 'Product 6',
+      description: 'Description 6',
+      productType: 'physical',
+      category: category._id.toString(),
+      price: 16,
+      stock: 100,
+      images: [{ url: 'https://example.com/product-6.jpg' }]
+    })
+    .expect(403);
+
+  assert.equal(blocked.body.success, false);
+  assert.equal(blocked.body.message, 'Product limit reached. Vendors can create up to 5 products.');
+
+  const count = await Product.countDocuments({ vendor: vendor._id });
+  assert.equal(count, 5);
+});

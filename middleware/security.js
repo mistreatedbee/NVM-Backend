@@ -8,8 +8,11 @@ const configuredCorsOrigins = String(process.env.CORS_ORIGINS || '')
 
 const trustedOrigins = new Set(
   [
+    'https://www.nvmmarketplace.co.za',
+    'https://nvmmarketplace.co.za',
     'http://localhost:5173',
     'http://localhost:3000',
+    'https://nvm-frontend.vercel.app',
     process.env.FRONTEND_URL,
     ...configuredCorsOrigins
   ].filter(Boolean)
@@ -18,7 +21,7 @@ const trustedOrigins = new Set(
 function isTrustedOrigin(origin) {
   if (!origin) return true;
   if (trustedOrigins.has(origin)) return true;
-  return origin.includes('vercel.app') || origin.includes('localhost');
+  return origin.endsWith('.vercel.app');
 }
 
 const apiLimiter = rateLimit({

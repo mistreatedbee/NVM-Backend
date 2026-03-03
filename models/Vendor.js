@@ -127,8 +127,7 @@ const vendorSchema = new mongoose.Schema({
   geoLocation: {
     type: {
       type: String,
-      enum: ['Point'],
-      default: 'Point'
+      enum: ['Point']
     },
     coordinates: {
       type: [Number],
@@ -458,6 +457,9 @@ vendorSchema.pre('save', function(next) {
       type: 'Point',
       coordinates: [Number(this.location.lng), Number(this.location.lat)]
     };
+  } else {
+    // Prevent invalid GeoJSON documents such as { type: "Point" } with no coordinates.
+    this.geoLocation = undefined;
   }
 
   if (this.bankDetails) {

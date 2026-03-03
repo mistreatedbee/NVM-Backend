@@ -248,7 +248,22 @@ exports.createVendor = async (req, res, next) => {
       }
     }
 
-    const vendor = await Vendor.create(vendorData);
+    let vendor;
+    try {
+      vendor = await Vendor.create(vendorData);
+    } catch (createError) {
+      // Guard against parallel submissions creating the same vendor for one user.
+      if (createError && createError.code === 11000) {
+        const existing = await Vendor.findOne({ user: req.user.id });
+        if (existing) {
+          return res.status(409).json({
+            success: false,
+            message: 'Vendor profile already exists'
+          });
+        }
+      }
+      throw createError;
+    }
 
     addActivityLog(vendor, {
       action: 'vendor.created',
@@ -258,41 +273,56 @@ exports.createVendor = async (req, res, next) => {
     });
     await vendor.save();
 
-    await notifyUser({
-      user: req.user,
-      type: 'APPROVAL',
-      subType: 'VENDOR_SUBMITTED',
-      title: 'Vendor registration submitted',
-      message: 'Your application is pending admin approval.',
-      linkUrl: '/vendor/approval-status',
-      metadata: { event: 'vendor.submitted', vendorId: vendor._id.toString() },
-      emailTemplate: 'vendor_registration_received',
-      emailContext: {
-        vendorName: vendor.storeName,
-        actionUrl: buildAppUrl('/vendor/approval-status')
-      },
-      actor: {
-        actorId: req.user.id,
-        actorRole: req.user.role === 'vendor' ? 'Vendor' : 'Customer',
-        action: 'vendor.registration-submitted',
-        entityType: 'Vendor'
-      }
-    });
+    try {
+      await notifyUser({
+        user: req.user,
+        type: 'APPROVAL',
+        subType: 'VENDOR_SUBMITTED',
+        title: 'Vendor registration submitted',
+        message: 'Your application is pending admin approval.',
+        linkUrl: '/vendor/approval-status',
+        metadata: { event: 'vendor.submitted', vendorId: vendor._id.toString() },
+        emailTemplate: 'vendor_registration_received',
+        emailContext: {
+          vendorName: vendor.storeName,
+          actionUrl: buildAppUrl('/vendor/approval-status')
+        },
+        actor: {
+          actorId: req.user.id,
+          actorRole: req.user.role === 'vendor' ? 'Vendor' : 'Customer',
+          action: 'vendor.registration-submitted',
+          entityType: 'Vendor'
+        }
+      });
+    } catch (notifyError) {
+      console.error('[vendor.createVendor] user notification failed', {
+        vendorId: vendor._id.toString(),
+        userId: String(req.user.id),
+        error: notifyError.message
+      });
+    }
 
-    await notifyAdmins({
-      type: 'SYSTEM',
-      subType: 'NEW_VENDOR_PENDING_APPROVAL',
-      title: 'New vendor awaiting approval',
-      message: `${vendor.storeName} submitted registration and needs review.`,
-      linkUrl: `/admin/vendors`,
-      metadata: { event: 'vendor.awaiting-approval', vendorId: vendor._id.toString() },
-      emailTemplate: 'new_vendor_needs_approval',
-      emailContext: {
-        status: 'vendor-approval-pending',
-        vendorName: vendor.storeName,
-        actionLinks: [{ label: 'Review vendor', url: buildAppUrl('/admin/vendors') }]
-      }
-    });
+    try {
+      await notifyAdmins({
+        type: 'SYSTEM',
+        subType: 'NEW_VENDOR_PENDING_APPROVAL',
+        title: 'New vendor awaiting approval',
+        message: `${vendor.storeName} submitted registration and needs review.`,
+        linkUrl: `/admin/vendors`,
+        metadata: { event: 'vendor.awaiting-approval', vendorId: vendor._id.toString() },
+        emailTemplate: 'new_vendor_needs_approval',
+        emailContext: {
+          status: 'vendor-approval-pending',
+          vendorName: vendor.storeName,
+          actionLinks: [{ label: 'Review vendor', url: buildAppUrl('/admin/vendors') }]
+        }
+      });
+    } catch (notifyError) {
+      console.error('[vendor.createVendor] admin notification failed', {
+        vendorId: vendor._id.toString(),
+        error: notifyError.message
+      });
+    }
 
     res.status(201).json({
       success: true,
@@ -1130,29 +1160,40 @@ exports.getMyVendorProfile = async (req, res, next) => {
     if (!vendor && role === 'vendor') {
       const slug = toSlug(req.user.name || req.user.email || req.user.id.toString());
       const uniqueSlug = `${slug}-${Date.now().toString(36)}`;
-      vendor = await Vendor.create({
-        user: req.user.id,
-        storeName: 'My Store',
-        storeSlug: uniqueSlug,
-        slug: uniqueSlug,
-        usernameSlug: uniqueSlug,
-        description: 'Complete your store profile.',
-        category: 'other',
-        email: req.user.email || '',
-        phone: req.user.phone || '0000000000',
-        address: {
-          street: 'To be completed',
-          city: 'To be completed',
-          state: 'To be completed',
-          country: 'To be completed',
-          zipCode: 'To be completed'
-        },
-        status: 'approved',
-        accountStatus: 'active',
-        vendorStatus: 'ACTIVE',
-        isActive: true
-      });
-      vendor = await Vendor.findById(vendor._id).populate('user', 'name email avatar');
+      const fallbackEmail = String(req.user.email || `${req.user.id}@nvm.local`).trim().toLowerCase();
+      try {
+        vendor = await Vendor.create({
+          user: req.user.id,
+          storeName: 'My Store',
+          storeSlug: uniqueSlug,
+          slug: uniqueSlug,
+          usernameSlug: uniqueSlug,
+          description: 'Complete your store profile.',
+          category: 'other',
+          email: fallbackEmail,
+          phone: req.user.phone || '0000000000',
+          address: {
+            street: 'To be completed',
+            city: 'To be completed',
+            state: 'To be completed',
+            country: 'To be completed',
+            zipCode: 'To be completed'
+          },
+          status: 'approved',
+          accountStatus: 'active',
+          vendorStatus: 'ACTIVE',
+          isActive: true
+        });
+      } catch (createError) {
+        if (createError && createError.code === 11000) {
+          vendor = await Vendor.findOne({ user: req.user.id }).populate('user', 'name email avatar');
+        } else {
+          throw createError;
+        }
+      }
+      if (vendor?._id) {
+        vendor = await Vendor.findById(vendor._id).populate('user', 'name email avatar');
+      }
     }
 
     if (!vendor) {
