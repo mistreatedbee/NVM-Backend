@@ -14,7 +14,20 @@ const activityLogSchema = new mongoose.Schema({
   },
   action: {
     type: String,
-    enum: ['LOGIN', 'LOGOUT', 'REGISTER', 'PASSWORD_RESET', 'PRODUCT_CREATE', 'ORDER_PLACED', 'REVIEW_CREATED', 'PROFILE_UPDATED', 'CHAT_MESSAGE', 'ADMIN_ACTION'],
+    enum: [
+      'LOGIN',
+      'LOGOUT',
+      'REGISTER',
+      'PASSWORD_RESET',
+      'PASSWORD_RESET_REQUESTED',
+      'PASSWORD_RESET_COMPLETED',
+      'PRODUCT_CREATE',
+      'ORDER_PLACED',
+      'REVIEW_CREATED',
+      'PROFILE_UPDATED',
+      'CHAT_MESSAGE',
+      'ADMIN_ACTION'
+    ],
     required: true
   },
   entityType: {

@@ -66,11 +66,16 @@ const authTemplates = [
     subject: 'Reset your password',
     requiredVariables: ['actionUrl'],
     compose: (vars) => {
+      const expiresIn = Number(vars.resetExpiresMinutes || 30);
       const html = baseLayout({
         title: 'Reset password request',
         preheader: 'If this was you, continue securely.',
         greeting: `Hi ${vars.userName || 'there'},`,
-        paragraphs: ['We received a request to reset your password. This link expires soon.'],
+        paragraphs: [
+          'We received a request to reset your password.',
+          `This secure link expires in ${expiresIn} minutes.`,
+          'If you did not request this, you can ignore this email.'
+        ],
         cta: { label: actionLabel(vars, 'Reset Password'), url: vars.actionUrl },
         supportEmail: vars.supportEmail,
         footerLinks: [{ label: 'Security Help', url: `${vars.appUrl}/profile` }]

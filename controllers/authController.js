@@ -8,8 +8,52 @@ const { generateSecret, verifyTotpCode, encryptSecret, decryptSecret, buildOtpAu
 const ReferralCode = require('../models/ReferralCode');
 const ReferralEvent = require('../models/ReferralEvent');
 
+const GENERIC_FORGOT_PASSWORD_MESSAGE = 'If an account exists for that email, we sent a reset link.';
+const RESET_TOKEN_BYTES = Number(process.env.RESET_PASSWORD_TOKEN_BYTES || 32);
+const RESET_TOKEN_TTL_MINUTES = Math.min(60, Math.max(15, Number(process.env.RESET_PASSWORD_EXPIRE_MINUTES || 30)));
+
 function hashToken(rawToken) {
   return crypto.createHash('sha256').update(rawToken).digest('hex');
+}
+
+function generateRawResetToken() {
+  return crypto.randomBytes(RESET_TOKEN_BYTES).toString('hex');
+}
+
+function buildResetPasswordLink(rawToken, email) {
+  const token = encodeURIComponent(rawToken);
+  const safeEmail = encodeURIComponent(email);
+  return buildAppUrl(`/reset-password?token=${token}&email=${safeEmail}`);
+}
+
+function isStrongPassword(password) {
+  const value = String(password || '');
+  if (value.length < 8) return false;
+  if (!/[a-z]/.test(value)) return false;
+  if (!/[A-Z]/.test(value)) return false;
+  if (!/[0-9]/.test(value)) return false;
+  return true;
+}
+
+function resetTokenInvalidResponse(res) {
+  return res.status(400).json({
+    success: false,
+    message: 'Reset link is invalid or expired.'
+  });
+}
+
+function hasValidResetToken(user, incomingTokenHash) {
+  if (!user) return false;
+
+  const storedHash = String(user.resetPasswordTokenHash || user.resetPasswordToken || '');
+  const expiresAt = user.resetPasswordTokenExpiresAt || user.resetPasswordExpire;
+  const usedAt = user.resetPasswordUsedAt || null;
+
+  if (!storedHash || !expiresAt || usedAt) return false;
+  if (String(storedHash) !== String(incomingTokenHash)) return false;
+  if (new Date(expiresAt).getTime() <= Date.now()) return false;
+
+  return true;
 }
 
 function safeAuthResponse(user, token, message = 'Success') {
@@ -388,20 +432,39 @@ exports.resendVerification = async (req, res, next) => {
 exports.forgotPassword = async (req, res, next) => {
   try {
     const email = String(req.body?.email || '').toLowerCase().trim();
-    const user = await User.findOne({ email });
+    if (!email) {
+      return res.status(200).json({
+        success: true,
+        message: GENERIC_FORGOT_PASSWORD_MESSAGE
+      });
+    }
+
+    const user = await User.findOne({ email }).select('name email role resetPasswordTokenHash resetPasswordTokenExpiresAt');
 
     if (user) {
-      const resetToken = user.getResetPasswordToken();
+      const resetToken = generateRawResetToken();
+      const resetTokenHash = hashToken(resetToken);
+      const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000);
+
+      user.resetPasswordTokenHash = resetTokenHash;
+      user.resetPasswordTokenExpiresAt = expiresAt;
+      user.resetPasswordRequestedAt = new Date();
+      user.resetPasswordUsedAt = undefined;
+      // Keep legacy fields populated for backward compatibility with any older flows.
+      user.resetPasswordToken = resetTokenHash;
+      user.resetPasswordExpire = expiresAt;
       await user.save();
 
-      const resetUrl = buildAppUrl(`/reset-password?token=${resetToken}`);
+      const resetUrl = buildResetPasswordLink(resetToken, user.email);
 
       await safeSendTemplateEmail({
         to: user.email,
         templateId: 'password_reset',
         context: {
           userName: user.name,
-          actionLinks: [{ label: 'Reset Password', url: resetUrl }]
+          actionUrl: resetUrl,
+          actionLinks: [{ label: 'Reset Password', url: resetUrl }],
+          resetExpiresMinutes: RESET_TOKEN_TTL_MINUTES
         },
         metadata: {
           event: 'password.reset.requested',
@@ -409,10 +472,10 @@ exports.forgotPassword = async (req, res, next) => {
         }
       });
 
-    await notifyUser({
-      user,
-      type: 'SECURITY',
-      subType: 'PASSWORD_RESET_REQUESTED',
+      await notifyUser({
+        user,
+        type: 'SECURITY',
+        subType: 'PASSWORD_RESET_REQUESTED',
         title: 'Password reset requested',
         message: 'If this was not you, secure your account immediately.',
         linkUrl: '/profile',
@@ -421,14 +484,25 @@ exports.forgotPassword = async (req, res, next) => {
           actorId: user._id,
           actorRole: user.role === 'vendor' ? 'Vendor' : user.role === 'admin' ? 'Admin' : 'Customer',
           action: 'security.password-reset-requested'
-      }
-    });
+        }
+      });
+
+      await logActivity({
+        userId: user._id,
+        role: user.role,
+        action: 'PASSWORD_RESET_REQUESTED',
+        entityType: 'USER',
+        entityId: user._id,
+        metadata: { via: 'email_link' },
+        ipAddress: resolveIp(req),
+        userAgent: req.headers['user-agent'] || ''
+      });
 
     }
 
     res.status(200).json({
       success: true,
-      message: 'If that email exists, a password reset link has been sent.'
+      message: GENERIC_FORGOT_PASSWORD_MESSAGE
     });
   } catch (error) {
     next(error);
@@ -436,32 +510,44 @@ exports.forgotPassword = async (req, res, next) => {
 };
 
 // @desc    Reset password
-// @route   PUT|POST /api/auth/reset-password/:token
+// @route   POST /api/auth/reset-password | PUT /api/auth/reset-password/:token
 // @access  Public
 exports.resetPassword = async (req, res, next) => {
   try {
+    const email = String(req.body?.email || req.query?.email || '').toLowerCase().trim();
     const rawToken = req.params?.token || req.body?.token || req.query?.token;
-    if (!rawToken) {
-      return res.status(400).json({ success: false, message: 'Reset token is required' });
+    if (!email || !rawToken) {
+      return resetTokenInvalidResponse(res);
     }
 
-    const resetPasswordToken = hashToken(rawToken);
-
-    const user = await User.findOne({
-      resetPasswordToken,
-      resetPasswordExpire: { $gt: Date.now() }
-    });
-
-    if (!user) {
-      return res.status(400).json({ success: false, message: 'Invalid or expired token' });
+    const resetPasswordTokenHash = hashToken(rawToken);
+    const user = await User.findOne({ email }).select('+password');
+    if (!hasValidResetToken(user, resetPasswordTokenHash)) {
+      return resetTokenInvalidResponse(res);
     }
 
     const nextPassword = req.body?.newPassword || req.body?.password;
-    if (!nextPassword || String(nextPassword).length < 6) {
-      return res.status(400).json({ success: false, message: 'A valid new password is required (min 6 characters)' });
+    const confirmPassword = req.body?.confirmPassword;
+
+    if (!nextPassword || !isStrongPassword(nextPassword)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 8 characters and include uppercase, lowercase, and a number.'
+      });
+    }
+
+    if (typeof confirmPassword !== 'undefined' && String(nextPassword) !== String(confirmPassword)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password confirmation does not match.'
+      });
     }
 
     user.password = nextPassword;
+    user.resetPasswordTokenHash = undefined;
+    user.resetPasswordTokenExpiresAt = undefined;
+    user.resetPasswordUsedAt = new Date();
+    // Clear legacy fields as well.
     user.resetPasswordToken = undefined;
     user.resetPasswordExpire = undefined;
     await user.save();
@@ -469,7 +555,7 @@ exports.resetPassword = async (req, res, next) => {
     await logActivity({
       userId: user._id,
       role: user.role,
-      action: 'PASSWORD_RESET',
+      action: 'PASSWORD_RESET_COMPLETED',
       entityType: 'USER',
       entityId: user._id,
       metadata: { via: 'token' },
@@ -490,8 +576,36 @@ exports.resetPassword = async (req, res, next) => {
       }
     });
 
-    const token = generateToken(user._id);
-    res.status(200).json(safeAuthResponse(user, token, 'Password reset successful'));
+    res.status(200).json({
+      success: true,
+      message: 'Password updated successfully.'
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Validate reset token
+// @route   POST /api/auth/validate-reset-token
+// @access  Public
+exports.validateResetToken = async (req, res, next) => {
+  try {
+    const email = String(req.body?.email || '').toLowerCase().trim();
+    const rawToken = String(req.body?.token || '').trim();
+    if (!email || !rawToken) {
+      return resetTokenInvalidResponse(res);
+    }
+
+    const tokenHash = hashToken(rawToken);
+    const user = await User.findOne({ email }).select('resetPasswordTokenHash resetPasswordToken resetPasswordTokenExpiresAt resetPasswordExpire resetPasswordUsedAt');
+    if (!hasValidResetToken(user, tokenHash)) {
+      return resetTokenInvalidResponse(res);
+    }
+
+    return res.status(200).json({
+      success: true,
+      valid: true
+    });
   } catch (error) {
     next(error);
   }

@@ -66,6 +66,10 @@ const userSchema = new mongoose.Schema({
   verificationTokenExpire: Date,
   resetPasswordToken: String,
   resetPasswordExpire: Date,
+  resetPasswordTokenHash: String,
+  resetPasswordTokenExpiresAt: Date,
+  resetPasswordRequestedAt: Date,
+  resetPasswordUsedAt: Date,
   twoFactorEnabled: {
     type: Boolean,
     default: false
@@ -141,8 +145,11 @@ userSchema.methods.getResetPasswordToken = function() {
   const resetToken = crypto.randomBytes(20).toString('hex');
   this.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
   this.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 minutes
+  this.resetPasswordTokenHash = this.resetPasswordToken;
+  this.resetPasswordTokenExpiresAt = new Date(this.resetPasswordExpire);
+  this.resetPasswordRequestedAt = new Date();
+  this.resetPasswordUsedAt = undefined;
   return resetToken;
 };
 
 module.exports = mongoose.model('User', userSchema);
-
