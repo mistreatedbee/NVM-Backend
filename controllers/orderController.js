@@ -20,6 +20,7 @@ const { recordPurchaseEventsForOrder } = require('../services/productAnalyticsSe
 const { logActivity, resolveIp } = require('../services/loggingService');
 const { evaluateFraudRules } = require('../services/trustSafetyService');
 const { calculateDeliveryFee } = require('../services/logisticsService');
+const { calculateOrderTotals } = require('../services/orderPricingService');
 const ORDER_IDEMPOTENCY_TTL_MS = 10 * 60 * 1000;
 const orderIdempotencyCache = new Map();
 
@@ -97,7 +98,7 @@ exports.createOrder = async (req, res, next) => {
       });
     }
 
-    // Validate items and calculate totals
+    // Validate items and calculate core pricing inputs
     let subtotal = 0;
     let shippingCost = 0;
     const orderItems = [];
@@ -171,15 +172,30 @@ exports.createOrder = async (req, res, next) => {
       }))
     });
 
-    const selectedDeliveryMethod = String(deliveryMethod || 'DELIVERY').toUpperCase() === 'PICKUP' ? 'PICKUP' : 'DELIVERY';
+    const selectedDeliveryMethod =
+      String(deliveryMethod || 'DELIVERY').toUpperCase() === 'PICKUP' ? 'PICKUP' : 'DELIVERY';
+
     if (selectedDeliveryMethod === 'DELIVERY') {
-      const deliveryOption = quote.options.find((option) => option.method === 'DELIVERY');
-      shippingCost = Number(deliveryOption?.fee || 0);
+      const deliveryOption = Array.isArray(quote?.options)
+        ? quote.options.find((option) => option.method === 'DELIVERY')
+        : null;
+
+      if (!deliveryOption) {
+        return res.status(400).json({
+          success: false,
+          message:
+            quote?.message ||
+            'We could not calculate a delivery fee for this address. Please update your address or choose collection where available.'
+        });
+      }
+
+      shippingCost = Number(deliveryOption.fee || 0);
     } else {
+      // Collection / pickup never charges a delivery fee
       shippingCost = 0;
     }
 
-    const tax = subtotal * 0.1; // 10% tax
+    let tax = 0;
     let discount = 0;
     const appliedVendorCoupons = [];
 
@@ -226,11 +242,23 @@ exports.createOrder = async (req, res, next) => {
       if (giftCardDoc.expiresAt && giftCardDoc.expiresAt < new Date()) {
         return res.status(400).json({ success: false, message: 'Gift card has expired' });
       }
-      giftCardApplied = Math.min(giftCardDoc.balance, Math.max(0, subtotal + shippingCost + tax - discount));
+      // Gift card applies against the gross total; clamp in pricing helper afterwards
+      giftCardApplied = Math.min(
+        giftCardDoc.balance,
+        Math.max(0, subtotal + shippingCost + tax - discount)
+      );
       discount += giftCardApplied;
     }
 
-    const total = Math.max(0, subtotal + shippingCost + tax - discount);
+    // Finalise tax, discount and totals using shared pricing helper
+    const pricing = calculateOrderTotals({
+      subtotal,
+      deliveryFee: shippingCost,
+      discount
+    });
+    tax = pricing.tax;
+    discount = pricing.discount;
+    const total = pricing.total;
 
     // Create order
     const order = await Order.create({
@@ -251,17 +279,13 @@ exports.createOrder = async (req, res, next) => {
       orderStatus: 'PENDING',
       deliveryMethod: selectedDeliveryMethod,
       fulfillmentMethod: selectedDeliveryMethod === 'PICKUP' ? 'collection' : 'delivery',
-      deliveryFeeBreakdown: quote.breakdown.map((item) => ({
+      deliveryFeeBreakdown: (quote.breakdown || []).map((item) => ({
         vendorId: item.vendorId,
         zoneId: item.zoneId || null,
-        fee: item.deliveryFee
+        // For collection orders, we explicitly store zero per-vendor delivery fee
+        fee: selectedDeliveryMethod === 'PICKUP' ? 0 : item.deliveryFee
       })),
-      totals: {
-        subtotal,
-        delivery: shippingCost,
-        discount,
-        total
-      },
+      totals: pricing.totals,
       customerNotes
     });
 
