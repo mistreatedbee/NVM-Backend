@@ -1,0 +1,43 @@
+# Backend email environment template (do not commit real secrets)
+EMAIL_PROVIDER=BREVO_API
+BREVO_API_KEY=
+
+# Optional SMTP fallback
+SMTP_HOST=smtp-relay.brevo.com
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM_NAME=NextWave Digital
+SMTP_FROM_EMAIL=your_verified_sender@domain.com
+APP_BASE_URL=https://nvm-frontend.vercel.app
+SUPPORT_EMAIL=
+EMAIL_DEBUG_ENABLED=false
+EMAIL_DEBUG_TOKEN=
+
+# Optional extra key used by other modules if needed
+API_MCP_KEY=
+
+# Required for vendor verification document uploads
+CLOUDINARY_CLOUD_NAME=
+CLOUDINARY_API_KEY=
+CLOUDINARY_API_SECRET=
+KNOWLEDGE_RESOURCE_UPLOAD_FOLDER=nvm/knowledge/resources
+
+# Optional toggles for vendor management notifications/hooks
+VENDOR_ADMIN_EVENTS_EMAIL_ENABLED=true
+VENDOR_ADMIN_EVENTS_IN_APP_ENABLED=true
+
+# Payments
+PAYMENTS_ENABLED=false
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+PAYFAST_MERCHANT_ID=
+PAYFAST_MERCHANT_KEY=
+PAYFAST_PASSPHRASE=
+PAYFAST_BASE_URL=https://sandbox.payfast.co.za/eng/process
+PAYFAST_ITN_URL=
+PAYFAST_RETURN_URL=
+PAYFAST_CANCEL_URL=
+
+# Optional payment toggles
+ENABLE_COD=true

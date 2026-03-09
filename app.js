@@ -1,0 +1,230 @@
+const express = require('express');
+const cors = require('cors');
+const dotenv = require('dotenv');
+const { securityHeaders, apiLimiter, requireTrustedOrigin, sensitiveWriteLimiter } = require('./middleware/security');
+
+dotenv.config();
+
+const app = express();
+app.set('trust proxy', 1);
+
+const configuredCorsOrigins = String(process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const allowedOrigins = [
+  'https://www.nvmmarketplace.co.za',
+  'https://nvmmarketplace.co.za',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'https://nvm-frontend.vercel.app',
+  process.env.FRONTEND_URL,
+  ...configuredCorsOrigins
+].filter(Boolean);
+
+const corsOptions = {
+  origin: function(origin, callback) {
+    // Allow server-to-server and non-browser requests.
+    if (!origin) return callback(null, true);
+
+    const isVercelPreview = origin.endsWith('.vercel.app');
+    if (allowedOrigins.includes(origin) || isVercelPreview) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS not allowed for origin: ${origin}`), false);
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'X-Session-Id',
+    'x-session-id',
+    'Idempotency-Key',
+    'idempotency-key'
+  ],
+  credentials: false,
+  optionsSuccessStatus: 204
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(securityHeaders);
+app.use('/api', apiLimiter);
+app.use('/api', requireTrustedOrigin);
+app.use('/api/reports', sensitiveWriteLimiter);
+app.use('/api/disputes', sensitiveWriteLimiter);
+app.use('/api/support', sensitiveWriteLimiter);
+app.use('/api/uploads', sensitiveWriteLimiter);
+
+const errorHandler = require('./middleware/errorHandler');
+
+const authRoutes = require('./routes/auth');
+const userRoutes = require('./routes/users');
+const vendorRoutes = require('./routes/vendors');
+const productRoutes = require('./routes/products');
+const orderRoutes = require('./routes/orders');
+const paymentRoutes = require('./routes/payments');
+const categoryRoutes = require('./routes/categories');
+const reviewRoutes = require('./routes/reviews');
+const chatRoutes = require('./routes/chats');
+const adminChatRoutes = require('./routes/adminChats');
+const notificationRoutes = require('./routes/notifications');
+const searchRoutes = require('./routes/search');
+const subscriptionRoutes = require('./routes/subscriptions');
+const bulkUploadRoutes = require('./routes/bulkUpload');
+const orderManagementRoutes = require('./routes/orderManagement');
+const invoiceRoutes = require('./routes/invoices');
+const adminInvoiceRoutes = require('./routes/adminInvoices');
+const vendorFinanceRoutes = require('./routes/vendorFinance');
+const analyticsRoutes = require('./routes/analytics');
+const emailRoutes = require('./routes/emails');
+const debugRoutes = require('./routes/debug');
+const vendorOrdersRoutes = require('./routes/vendorOrders');
+const adminOrdersRoutes = require('./routes/adminOrders');
+const adminVendorManagementRoutes = require('./routes/adminVendorManagement');
+const vendorDocumentsRoutes = require('./routes/vendorDocuments');
+const vendorProductsRoutes = require('./routes/vendorProducts');
+const vendorFeaturesRoutes = require('./routes/vendorFeatures');
+const adminProductsRoutes = require('./routes/adminProducts');
+const adminReviewsRoutes = require('./routes/adminReviews');
+const adminNotificationsRoutes = require('./routes/adminNotifications');
+const knowledgeRoutes = require('./routes/knowledge');
+const adminKnowledgeRoutes = require('./routes/adminKnowledge');
+const postsRoutes = require('./routes/posts');
+const adminPostsRoutes = require('./routes/adminPosts');
+const vendorToolkitRoutes = require('./routes/vendorToolkit');
+const adminPlaybookRoutes = require('./routes/adminPlaybook');
+const trackingRoutes = require('./routes/tracking');
+const adminDashboardRoutes = require('./routes/adminDashboard');
+const vendorDashboardRoutes = require('./routes/vendorDashboard');
+const wishlistRoutes = require('./routes/wishlist');
+const wishlistsRoutes = require('./routes/wishlists');
+const cartRoutes = require('./routes/cart');
+const recentlyViewedRoutes = require('./routes/recentlyViewed');
+const recommendationsRoutes = require('./routes/recommendations');
+const alertsRoutes = require('./routes/alerts');
+const addressesRoutes = require('./routes/addresses');
+const checkoutRoutes = require('./routes/checkout');
+const productQaRoutes = require('./routes/productQa');
+const adminControlRoutes = require('./routes/adminControl');
+const adminSuiteRoutes = require('./routes/adminSuite');
+const helpRoutes = require('./routes/help');
+const contentRoutes = require('./routes/content');
+const supportRoutes = require('./routes/support');
+const adminHelpRoutes = require('./routes/adminHelp');
+const adminSupportRoutes = require('./routes/adminSupport');
+const adminReturnsRoutes = require('./routes/adminReturns');
+const adminPaymentProofRoutes = require('./routes/adminPaymentProofs');
+const disputeRoutes = require('./routes/disputes');
+const reportRoutes = require('./routes/reports');
+const logisticsRoutes = require('./routes/logistics');
+const pickupPointRoutes = require('./routes/pickupPoints');
+const adminLogisticsRoutes = require('./routes/adminLogistics');
+const vendorLogisticsRoutes = require('./routes/vendorLogistics');
+const uploadRoutes = require('./routes/uploads');
+const monetizationRoutes = require('./routes/monetization');
+const publicRoutes = require('./routes/public');
+
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/vendors', vendorRoutes);
+app.use('/api/products', productRoutes);
+app.use('/api/orders', orderRoutes);
+app.use('/api/payments', paymentRoutes);
+app.use('/api/categories', categoryRoutes);
+app.use('/api/reviews', reviewRoutes);
+app.use('/api/chats', chatRoutes);
+app.use('/api/chat', chatRoutes);
+app.use('/api/admin/chats', adminChatRoutes);
+app.use('/api/admin', adminVendorManagementRoutes);
+app.use('/api/admin', adminProductsRoutes);
+app.use('/api/admin', adminOrdersRoutes);
+app.use('/api/admin', adminInvoiceRoutes);
+app.use('/api/admin', adminReviewsRoutes);
+app.use('/api/admin', adminNotificationsRoutes);
+app.use('/api/admin', adminKnowledgeRoutes);
+app.use('/api/admin', adminPostsRoutes);
+app.use('/api/admin', adminPlaybookRoutes);
+app.use('/api/admin', adminDashboardRoutes);
+app.use('/api/admin', adminSuiteRoutes);
+app.use('/api/admin', adminControlRoutes);
+app.use('/api/admin', adminHelpRoutes);
+app.use('/api/admin', adminSupportRoutes);
+app.use('/api/admin', adminReturnsRoutes);
+app.use('/api/admin', adminPaymentProofRoutes);
+app.use('/api/admin', adminLogisticsRoutes);
+app.use('/api/vendor', vendorFeaturesRoutes);
+app.use('/api/vendor', vendorDocumentsRoutes);
+app.use('/api/vendor', vendorProductsRoutes);
+app.use('/api/vendor', vendorOrdersRoutes);
+app.use('/api/vendor', vendorFinanceRoutes);
+app.use('/api/vendor', vendorToolkitRoutes);
+app.use('/api/vendor', vendorDashboardRoutes);
+app.use('/api/vendor', vendorLogisticsRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/search', searchRoutes);
+app.use('/api/subscriptions', subscriptionRoutes);
+app.use('/api/bulk-upload', bulkUploadRoutes);
+app.use('/api/order-management', orderManagementRoutes);
+app.use('/api/invoices', invoiceRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/emails', emailRoutes);
+app.use('/api/knowledge', knowledgeRoutes);
+app.use('/api/help', helpRoutes);
+app.use('/api/support', supportRoutes);
+app.use('/api/posts', postsRoutes);
+app.use('/api/track', trackingRoutes);
+app.use('/api/wishlist', wishlistRoutes);
+app.use('/api/wishlists', wishlistsRoutes);
+app.use('/api/cart', cartRoutes);
+app.use('/api/recently-viewed', recentlyViewedRoutes);
+app.use('/api/recommendations', recommendationsRoutes);
+app.use('/api/alerts', alertsRoutes);
+app.use('/api/addresses', addressesRoutes);
+app.use('/api/checkout', checkoutRoutes);
+app.use('/api/disputes', disputeRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/content', contentRoutes);
+app.use('/api/logistics', logisticsRoutes);
+app.use('/api/pickup-points', pickupPointRoutes);
+app.use('/api/uploads', uploadRoutes);
+app.use('/api/monetization', monetizationRoutes);
+app.use('/api/public', publicRoutes);
+app.use('/api', productQaRoutes);
+app.use('/debug', debugRoutes);
+
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    message: 'VM Marketplace API is running',
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.use((error, req, res, next) => {
+  if (!error || !String(error.message || '').startsWith('CORS not allowed for origin:')) {
+    return next(error);
+  }
+
+  return res.status(403).json({
+    success: false,
+    message: error.message
+  });
+});
+
+app.use(errorHandler);
+
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'Route not found'
+  });
+});
+
+module.exports = app;
