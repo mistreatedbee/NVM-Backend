@@ -1,4 +1,4 @@
-const DEFAULT_TAX_RATE = Number(process.env.TAX_RATE || 0.15);
+const DEFAULT_TAX_RATE = Number(process.env.TAX_RATE || 0.10);
 
 /**
  * Calculate canonical order totals from core pricing inputs.

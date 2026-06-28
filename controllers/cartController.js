@@ -146,14 +146,11 @@ function mapProductSummary(product) {
 
 async function getOrCreateCartByOwner({ userId = null, sessionId = null }) {
   const query = userId ? { userId } : { sessionId };
-  let cart = await Cart.findOne(query);
-  if (!cart) {
-    cart = await Cart.create({
-      userId: userId || null,
-      sessionId: userId ? null : sessionId,
-      items: []
-    });
-  }
+  const cart = await Cart.findOneAndUpdate(
+    query,
+    { $setOnInsert: { userId: userId || null, sessionId: userId ? null : sessionId, items: [] } },
+    { upsert: true, new: true }
+  );
   cart.items = collapseCartItems(cart.items);
   return cart;
 }
