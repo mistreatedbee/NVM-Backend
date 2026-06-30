@@ -333,6 +333,20 @@ productSchema.index({ title: 'text', name: 'text', description: 'text' });
 productSchema.index({ vendor: 1, sku: 1 }, { unique: true, sparse: true });
 productSchema.index({ status: 1, isActive: 1, scheduledPublishAt: 1 });
 
+// Compound sort indexes — single-field indexes can't serve multi-field sorts
+// without loading the entire filtered result set into memory first (hits
+// MongoDB's 32 MB in-memory sort limit as the catalogue grows).
+// Each index here matches an equality filter on status+isActive followed by
+// the exact sort key order used in the public listing controllers.
+productSchema.index({ status: 1, isActive: 1, ratingAvg: -1, totalSales: -1, createdAt: -1 }); // discover/featured sort
+productSchema.index({ status: 1, isActive: 1, totalSales: -1, createdAt: -1 });               // popular/best-selling sort
+productSchema.index({ status: 1, isActive: 1, price: 1,       createdAt: -1 });               // price ascending sort
+productSchema.index({ status: 1, isActive: 1, price: -1,      createdAt: -1 });               // price descending sort
+productSchema.index({ vendor: 1, status: 1, isActive: 1, createdAt: -1 });                    // vendor storefront newest
+productSchema.index({ vendor: 1, status: 1, isActive: 1, totalSales: -1, createdAt: -1 });    // vendor storefront popular
+productSchema.index({ vendor: 1, status: 1, isActive: 1, price: 1,       createdAt: -1 });    // vendor storefront price asc
+productSchema.index({ vendor: 1, status: 1, isActive: 1, price: -1,      createdAt: -1 });    // vendor storefront price desc
+
 // Generate slug before saving
 productSchema.pre('save', function(next) {
   if (this.isModified('name')) {
