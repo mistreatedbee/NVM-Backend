@@ -346,6 +346,7 @@ productSchema.index({ vendor: 1, status: 1, isActive: 1, createdAt: -1 });      
 productSchema.index({ vendor: 1, status: 1, isActive: 1, totalSales: -1, createdAt: -1 });    // vendor storefront popular
 productSchema.index({ vendor: 1, status: 1, isActive: 1, price: 1,       createdAt: -1 });    // vendor storefront price asc
 productSchema.index({ vendor: 1, status: 1, isActive: 1, price: -1,      createdAt: -1 });    // vendor storefront price desc
+productSchema.index({ featured: 1, status: 1, isActive: 1, ratingAvg: -1, totalSales: -1, createdAt: -1 }); // getFeaturedProducts sort
 
 // Admin moderation queue (getAdminProducts) sorts by submittedForReviewAt+createdAt
 // and is optionally filtered by status — same in-memory-sort risk as above.

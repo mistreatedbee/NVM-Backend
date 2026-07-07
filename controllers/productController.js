@@ -61,7 +61,14 @@ async function resolveCategoryFilter(categoryParam) {
   return byName?._id || null;
 }
 
+let visibilityFiltersCache = null;
+const VISIBILITY_FILTERS_CACHE_TTL_MS = 60 * 1000;
+
 async function getPublicVisibilityFilters() {
+  if (visibilityFiltersCache && Date.now() - visibilityFiltersCache.createdAt < VISIBILITY_FILTERS_CACHE_TTL_MS) {
+    return visibilityFiltersCache.value;
+  }
+
   const [categories, vendors] = await Promise.all([
     Category.find({ isActive: true }).select('_id'),
     Vendor.find({
@@ -86,10 +93,12 @@ async function getPublicVisibilityFilters() {
     }).select('_id')
   ]);
 
-  return {
+  const value = {
     category: { $in: categories.map((item) => item._id) },
     vendor: { $in: vendors.map((item) => item._id) }
   };
+  visibilityFiltersCache = { value, createdAt: Date.now() };
+  return value;
 }
 
 function isObjectId(value) {
