@@ -347,6 +347,11 @@ productSchema.index({ vendor: 1, status: 1, isActive: 1, totalSales: -1, created
 productSchema.index({ vendor: 1, status: 1, isActive: 1, price: 1,       createdAt: -1 });    // vendor storefront price asc
 productSchema.index({ vendor: 1, status: 1, isActive: 1, price: -1,      createdAt: -1 });    // vendor storefront price desc
 
+// Admin moderation queue (getAdminProducts) sorts by submittedForReviewAt+createdAt
+// and is optionally filtered by status — same in-memory-sort risk as above.
+productSchema.index({ status: 1, submittedForReviewAt: -1, createdAt: -1 }); // admin queue filtered by status
+productSchema.index({ submittedForReviewAt: -1, createdAt: -1 });            // admin queue, status=all
+
 // Generate slug before saving
 productSchema.pre('save', function(next) {
   if (this.isModified('name')) {

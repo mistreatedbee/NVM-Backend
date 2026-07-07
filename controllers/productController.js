@@ -382,6 +382,7 @@ exports.getAdminProducts = async (req, res, next) => {
         .populate('publishedBy', 'name email')
         .populate('rejectedBy', 'name email')
         .sort('-submittedForReviewAt -createdAt')
+        .allowDiskUse(true)
         .skip(skip)
         .limit(limit),
       Product.countDocuments(query)
