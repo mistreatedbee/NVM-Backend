@@ -22,7 +22,12 @@ const socketCorsOrigins = [
   ...configuredCorsOrigins
 ].filter(Boolean);
 
-mongoose.connect(process.env.MONGO_URI)
+mongoose.connect(process.env.MONGO_URI, {
+  maxPoolSize: 10,
+  serverSelectionTimeoutMS: 10000,
+  socketTimeoutMS: 45000,
+  family: 4,
+})
   .then(async () => {
     console.log('MongoDB Connected');
     await ensureDefaultCategories();

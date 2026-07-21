@@ -501,7 +501,8 @@ exports.getAllProducts = async (req, res, next) => {
         .populate('category', 'name slug')
         .sort(sort)
         .skip(skip)
-        .limit(limit),
+        .limit(limit)
+        .lean(),
       Product.countDocuments(query)
     ]);
 
@@ -1179,7 +1180,8 @@ exports.getFeaturedProducts = async (req, res, next) => {
         .populate('category', 'name slug')
         .sort({ ratingAvg: -1, totalSales: -1, createdAt: -1 })
         .skip(skip)
-        .limit(limit),
+        .limit(limit)
+        .lean(),
       Product.countDocuments({ featured: true, ...PUBLIC_PRODUCT_QUERY, ...visibility })
     ]);
 
@@ -1190,7 +1192,8 @@ exports.getFeaturedProducts = async (req, res, next) => {
           .populate('vendor', 'storeName slug logo')
           .populate('category', 'name slug')
           .sort({ ratingAvg: -1, totalSales: -1, createdAt: -1 })
-          .limit(limit),
+          .limit(limit)
+          .lean(),
         Product.countDocuments({ ...PUBLIC_PRODUCT_QUERY, ...visibility })
       ]);
     }
@@ -1291,14 +1294,15 @@ exports.getTrendingProducts = async (req, res, next) => {
     const products = await Product.find({ _id: { $in: productIds } })
       .populate('vendor', 'storeName slug logo')
       .populate('category', 'name slug')
-      .select('name title description shortDescription slug price images category vendor rating ratingAvg ratingCount totalSales createdAt featured status isActive');
+      .select('name title description shortDescription slug price images category vendor rating ratingAvg ratingCount totalSales createdAt featured status isActive')
+      .lean();
     const productMap = new Map(products.map((p) => [String(p._id), p]));
     let orderedProducts = rows
       .map((row) => {
         const product = productMap.get(String(row.product._id));
         if (!product) return null;
         return {
-          ...product.toObject(),
+          ...product,
           trendingScore: row.trendingScore,
           trendingMetrics: {
             views: row.views,
@@ -1317,9 +1321,10 @@ exports.getTrendingProducts = async (req, res, next) => {
         .populate('category', 'name slug')
         .sort({ totalSales: -1, createdAt: -1 })
         .skip(skip)
-        .limit(limit);
+        .limit(limit)
+        .lean();
       orderedProducts = fallback.map((product) => ({
-        ...product.toObject(),
+        ...product,
         trendingScore: product.totalSales || 0,
         trendingMetrics: {
           views: product.views || 0,

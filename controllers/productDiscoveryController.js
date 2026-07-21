@@ -26,7 +26,8 @@ exports.getNewArrivals = async (req, res, next) => {
         .populate('category', 'name slug')
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(limit),
+        .limit(limit)
+        .lean(),
       Product.countDocuments(query)
     ]);
     const result = {
