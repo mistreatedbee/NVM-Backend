@@ -429,6 +429,7 @@ vendorSchema.index({ storeName: 'text', description: 'text' });
 vendorSchema.index({ 'documents.status': 1 });
 vendorSchema.index({ 'complianceChecks.status': 1 });
 vendorSchema.index({ storeSlug: 1 }, { unique: true, sparse: true });
+vendorSchema.index({ isActive: 1, vendorStatus: 1, accountStatus: 1 }); // speeds up getPublicVisibilityFilters
 
 // Generate slug before saving
 vendorSchema.pre('save', function(next) {

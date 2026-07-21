@@ -62,7 +62,11 @@ async function resolveCategoryFilter(categoryParam) {
 }
 
 let visibilityFiltersCache = null;
-const VISIBILITY_FILTERS_CACHE_TTL_MS = 60 * 1000;
+const VISIBILITY_FILTERS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 min — was 60s, caused 2 DB queries on every request
+
+const _allProductsCache = new Map();
+const _featuredProductsCache = new Map();
+const PUBLIC_CACHE_TTL_MS = 2 * 60 * 1000;
 
 async function getPublicVisibilityFilters() {
   if (visibilityFiltersCache && Date.now() - visibilityFiltersCache.createdAt < VISIBILITY_FILTERS_CACHE_TTL_MS) {
@@ -450,8 +454,18 @@ function buildPublicSort(sort, hasTextQuery) {
 exports.getAllProducts = async (req, res, next) => {
   try {
     const { page, limit, skip } = parsePagination(req.query, { page: 1, limit: 12 });
-    const query = { ...PUBLIC_PRODUCT_QUERY, ...(await getPublicVisibilityFilters()) };
     const q = String(req.query.search || '').trim();
+    const hasFilters = q || req.query.category || req.query.vendor || req.query.type || req.query.minPrice || req.query.maxPrice;
+
+    if (!hasFilters) {
+      const cacheKey = `${page}:${limit}:${req.query.sort || ''}`;
+      const hit = _allProductsCache.get(cacheKey);
+      if (hit && Date.now() - hit.ts < PUBLIC_CACHE_TTL_MS) {
+        return res.status(200).json(hit.data);
+      }
+    }
+
+    const query = { ...PUBLIC_PRODUCT_QUERY, ...(await getPublicVisibilityFilters()) };
 
     if (req.query.category) {
       const categoryId = await resolveCategoryFilter(req.query.category);
@@ -491,7 +505,12 @@ exports.getAllProducts = async (req, res, next) => {
       Product.countDocuments(query)
     ]);
 
-    res.status(200).json({ success: true, count: products.length, total, pages: Math.ceil(total / limit), currentPage: page, data: products });
+    const result = { success: true, count: products.length, total, pages: Math.ceil(total / limit), currentPage: page, data: products };
+    if (!hasFilters) {
+      const cacheKey = `${page}:${limit}:${req.query.sort || ''}`;
+      _allProductsCache.set(cacheKey, { data: result, ts: Date.now() });
+    }
+    res.status(200).json(result);
   } catch (error) {
     next(error);
   }
@@ -1147,6 +1166,11 @@ exports.getPublicVendorProducts = async (req, res, next) => {
 exports.getFeaturedProducts = async (req, res, next) => {
   try {
     const { page, limit, skip } = parsePagination(req.query, { page: 1, limit: 8 });
+    const cacheKey = `${page}:${limit}`;
+    const hit = _featuredProductsCache.get(cacheKey);
+    if (hit && Date.now() - hit.ts < PUBLIC_CACHE_TTL_MS) {
+      return res.status(200).json(hit.data);
+    }
     const visibility = await getPublicVisibilityFilters();
     let [products, total] = await Promise.all([
       Product.find({ featured: true, ...PUBLIC_PRODUCT_QUERY, ...visibility })
@@ -1171,14 +1195,9 @@ exports.getFeaturedProducts = async (req, res, next) => {
       ]);
     }
 
-    res.status(200).json({
-      success: true,
-      count: products.length,
-      total,
-      pages: Math.ceil(total / limit),
-      currentPage: page,
-      data: products
-    });
+    const result = { success: true, count: products.length, total, pages: Math.ceil(total / limit), currentPage: page, data: products };
+    _featuredProductsCache.set(cacheKey, { data: result, ts: Date.now() });
+    res.status(200).json(result);
   } catch (error) {
     next(error);
   }

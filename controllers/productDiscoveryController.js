@@ -6,10 +6,18 @@ function parsePagination(query, defaults = { page: 1, limit: 12 }) {
   return { page, limit, skip: (page - 1) * limit };
 }
 
+const _newArrivalsCache = new Map();
+const NEW_ARRIVALS_CACHE_TTL_MS = 2 * 60 * 1000;
+
 // GET /api/products/new
 exports.getNewArrivals = async (req, res, next) => {
   try {
     const { page, limit, skip } = parsePagination(req.query, { page: 1, limit: 8 });
+    const cacheKey = `${page}:${limit}`;
+    const hit = _newArrivalsCache.get(cacheKey);
+    if (hit && Date.now() - hit.ts < NEW_ARRIVALS_CACHE_TTL_MS) {
+      return res.status(200).json(hit.data);
+    }
     const query = { status: 'PUBLISHED', isActive: true };
     const [data, total] = await Promise.all([
       Product.find(query)
@@ -21,14 +29,16 @@ exports.getNewArrivals = async (req, res, next) => {
         .limit(limit),
       Product.countDocuments(query)
     ]);
-    return res.status(200).json({
+    const result = {
       success: true,
       data,
       total,
       page,
       pages: Math.ceil(total / limit),
       limit
-    });
+    };
+    _newArrivalsCache.set(cacheKey, { data: result, ts: Date.now() });
+    return res.status(200).json(result);
   } catch (error) {
     return next(error);
   }

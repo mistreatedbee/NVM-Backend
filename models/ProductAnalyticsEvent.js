@@ -45,6 +45,7 @@ const productAnalyticsEventSchema = new mongoose.Schema(
 productAnalyticsEventSchema.index({ vendorId: 1, createdAt: -1 });
 productAnalyticsEventSchema.index({ productId: 1, createdAt: -1 });
 productAnalyticsEventSchema.index({ eventType: 1, createdAt: -1 });
+productAnalyticsEventSchema.index({ createdAt: -1, eventType: 1 }); // for trending $match on date range + eventType
 productAnalyticsEventSchema.index(
   { orderId: 1, productId: 1, eventType: 1 },
   { unique: true, partialFilterExpression: { eventType: 'PURCHASE', orderId: { $exists: true } } }
