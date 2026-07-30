@@ -8,6 +8,7 @@ const { initSocket } = require('./socket');
 const registerChatHandler = require('./socket/chatHandler');
 const { startVendorFeatureJobs } = require('./controllers/vendorFeatureController');
 const paaq = require('./paaq');
+const { trackMongooseConnection } = require('./paaqMongoose');
 
 dotenv.config();
 
@@ -22,6 +23,8 @@ const socketCorsOrigins = [
   process.env.FRONTEND_URL,
   ...configuredCorsOrigins
 ].filter(Boolean);
+
+trackMongooseConnection();
 
 mongoose.connect(process.env.MONGO_URI, {
   maxPoolSize: 10,
