@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const { securityHeaders, apiLimiter, requireTrustedOrigin, sensitiveWriteLimiter } = require('./middleware/security');
+const { paaqMiddleware, paaqErrorMiddleware } = require('./middleware/paaqMiddleware');
 
 dotenv.config();
 
@@ -61,6 +62,7 @@ app.use('/api/reports', sensitiveWriteLimiter);
 app.use('/api/disputes', sensitiveWriteLimiter);
 app.use('/api/support', sensitiveWriteLimiter);
 app.use('/api/uploads', sensitiveWriteLimiter);
+app.use('/api', paaqMiddleware);
 
 const errorHandler = require('./middleware/errorHandler');
 
@@ -218,6 +220,7 @@ app.use((error, req, res, next) => {
   });
 });
 
+app.use(paaqErrorMiddleware);
 app.use(errorHandler);
 
 app.use((req, res) => {

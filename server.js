@@ -7,6 +7,7 @@ const { ensureDefaultCategories } = require('./utils/seedDefaultCategories');
 const { initSocket } = require('./socket');
 const registerChatHandler = require('./socket/chatHandler');
 const { startVendorFeatureJobs } = require('./controllers/vendorFeatureController');
+const paaq = require('./paaq');
 
 dotenv.config();
 
@@ -30,6 +31,7 @@ mongoose.connect(process.env.MONGO_URI, {
 })
   .then(async () => {
     console.log('MongoDB Connected');
+    await paaq.init();
     await ensureDefaultCategories();
 
     const httpServer = http.createServer(app);
