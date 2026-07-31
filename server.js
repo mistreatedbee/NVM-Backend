@@ -1,6 +1,7 @@
 const dotenv = require('dotenv');
 const mongoose = require('mongoose');
 const http = require('http');
+const https = require('https');
 const { Server } = require('socket.io');
 const app = require('./app');
 const { ensureDefaultCategories } = require('./utils/seedDefaultCategories');
@@ -58,7 +59,7 @@ mongoose.connect(process.env.MONGO_URI, {
       if (process.env.NODE_ENV === 'production' && process.env.RENDER_EXTERNAL_URL) {
         const pingUrl = `${process.env.RENDER_EXTERNAL_URL}/api/health`;
         setInterval(() => {
-          http.get(pingUrl, (res) => {
+          https.get(pingUrl, (res) => {
             console.log(`[keep-alive] ping ${res.statusCode}`);
           }).on('error', () => {});
         }, 14 * 60 * 1000);
