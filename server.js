@@ -53,6 +53,16 @@ mongoose.connect(process.env.MONGO_URI, {
     httpServer.listen(PORT, () => {
       console.log(`VM Marketplace Server running on port ${PORT}`);
       console.log(`API available at http://localhost:${PORT}/api`);
+
+      // Keep Render free tier alive — ping every 14 minutes to prevent cold starts
+      if (process.env.NODE_ENV === 'production' && process.env.RENDER_EXTERNAL_URL) {
+        const pingUrl = `${process.env.RENDER_EXTERNAL_URL}/api/health`;
+        setInterval(() => {
+          http.get(pingUrl, (res) => {
+            console.log(`[keep-alive] ping ${res.statusCode}`);
+          }).on('error', () => {});
+        }, 14 * 60 * 1000);
+      }
     });
   })
   .catch((err) => {
