@@ -27,14 +27,64 @@ function resolveCoordinates(address = {}) {
   return { lat, lng };
 }
 
+// Most customers just type a street address and never send lat/lng (that's
+// only captured when they use the "Use My Current Location" button on the
+// frontend). Without a fallback here, every one of those checkouts fails
+// with "Address coordinates required" — so geocode the typed address
+// server-side. Cached in-memory since the same address is quoted repeatedly
+// during a single checkout (preview is called on every field/method change).
+const GEOCODE_CACHE_TTL_MS = 60 * 60 * 1000;
+const geocodeCache = new Map();
+
+function addressCacheKey(address = {}) {
+  return [address.street, address.city, address.state, address.zipCode, address.country]
+    .map((part) => String(part || '').trim().toLowerCase())
+    .join('|');
+}
+
+async function geocodeAddress(address = {}) {
+  const key = addressCacheKey(address);
+  if (!key.replace(/\|/g, '')) return null;
+
+  const cached = geocodeCache.get(key);
+  if (cached && Date.now() - cached.ts < GEOCODE_CACHE_TTL_MS) {
+    return cached.coords;
+  }
+
+  const query = [address.street, address.city, address.state, address.zipCode, address.country || 'South Africa']
+    .filter(Boolean)
+    .join(', ');
+  if (!query) return null;
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'NVM-Marketplace/1.0 (checkout delivery quote)' }
+    }).finally(() => clearTimeout(timeout));
+    const results = await res.json();
+    const first = Array.isArray(results) ? results[0] : null;
+    const coords = first ? { lat: Number(first.lat), lng: Number(first.lon) } : null;
+    geocodeCache.set(key, { ts: Date.now(), coords });
+    return coords;
+  } catch {
+    return null;
+  }
+}
+
 async function calculateDeliveryFee({ customerAddress, cartItems }) {
-  const coords = resolveCoordinates(customerAddress);
+  let coords = resolveCoordinates(customerAddress);
+  if (!coords) {
+    coords = await geocodeAddress(customerAddress);
+  }
   if (!coords) {
     return {
       options: [],
       totalDeliveryFee: 0,
       breakdown: [],
-      message: 'Address coordinates (lat,lng) are required for delivery quote.'
+      message: 'We could not find that address. Please check it for typos, or use "Use My Current Location" for a precise quote.'
     };
   }
 
