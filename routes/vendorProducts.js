@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authenticate, isVendor, requireVerifiedEmail } = require('../middleware/auth');
 const { requireActiveVendorAccount } = require('../middleware/requireActiveVendorAccount');
-const { productValidation, validate, paginationValidation, validateProductId } = require('../middleware/validator');
+const { productValidation, productImagesValidation, validate, paginationValidation, validateProductId } = require('../middleware/validator');
 const {
   createProduct,
   getMyProducts,
@@ -25,7 +25,7 @@ router.get('/products/:productId', validateProductId, validate, getVendorProduct
 
 // Write operations: require verified email
 router.post('/products', requireVerifiedEmail, enforceVendorPlanLimits, productValidation, validate, createProduct);
-router.put('/products/:productId', requireVerifiedEmail, validateProductId, validate, updateProduct);
+router.put('/products/:productId', requireVerifiedEmail, validateProductId, ...productImagesValidation, validate, updateProduct);
 router.post('/products/:productId/submit', requireVerifiedEmail, validateProductId, validate, submitProductForReview);
 if (VENDOR_CAN_UNPUBLISH) {
   router.patch('/products/:productId/unpublish', requireVerifiedEmail, validateProductId, validate, vendorUnpublishProduct);

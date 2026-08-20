@@ -43,6 +43,29 @@ exports.loginValidation = [
     .notEmpty().withMessage('Password is required')
 ];
 
+// Images must be hosted URLs from the upload endpoint (Cloudinary), never raw
+// base64 data embedded in the document — that bloats documents to multi-MB
+// sizes and makes every product query on the collection time out. Shared
+// between create (full payload) and update (partial payload) validation.
+exports.productImagesValidation = [
+  body('images')
+    .optional()
+    .isArray({ max: 10 }).withMessage('You can upload up to 10 images'),
+  body('images.*.url')
+    .exists().withMessage('Each image needs a url — upload it via /api/uploads first')
+    .bail()
+    .isString()
+    .bail()
+    .custom((value) => {
+      if (/^data:/i.test(value)) {
+        throw new Error('Images must be uploaded via /api/uploads and referenced by URL — raw base64 data is not allowed');
+      }
+      return true;
+    })
+    .isURL({ protocols: ['http', 'https'], require_protocol: true })
+    .withMessage('Each image url must be a valid http(s) URL')
+];
+
 // Product validation
 exports.productValidation = [
   body('name')
@@ -60,7 +83,8 @@ exports.productValidation = [
     .notEmpty().withMessage('Category is required'),
   body('productType')
     .notEmpty().withMessage('Product type is required')
-    .isIn(['physical', 'digital', 'service']).withMessage('Invalid product type')
+    .isIn(['physical', 'digital', 'service']).withMessage('Invalid product type'),
+  ...exports.productImagesValidation
 ];
 
 exports.productReportValidation = [
